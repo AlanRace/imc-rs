@@ -137,7 +137,29 @@ impl Panorama {
             pixel_scale_coef: None,
         }
     }
+
+    pub fn get_image(&self, file: &mut File) -> Result<Vec::<u8>, std::io::Error> {
+        let mut image_start_offset = self.image_start_offset.unwrap();
+        
+        // Add an offset to skip the C# Drawing data
+        image_start_offset += 161;
+        let image_size = self.image_end_offset.unwrap() - image_start_offset;
+
+        let mut buf_u8 = vec![0; image_size.try_into().unwrap()];
+
+        match file.seek(SeekFrom::Start(image_start_offset as u64)) {
+            Ok(_seek) => {
+                match file.read_exact(&mut buf_u8) {
+                    Ok(()) => Ok(buf_u8),
+                    Err(error) => Err(error)
+                } 
+            }
+            Err(error) => Err(error)
+        }
+    }
 }
+
+
 
 #[derive(Debug)]
 pub struct AcquisitionChannel {
@@ -243,20 +265,44 @@ enum ROIType {
 
 #[derive(Debug)]
 pub struct AcquisitionROI {
-    id: String,
-    panorama_id: String,
-    roi_type: ROIType,
+    id: Option<String>,
+    panorama_id: Option<String>,
+    roi_type: Option<ROIType>,
+}
+
+impl AcquisitionROI {
+    pub fn new() -> AcquisitionROI {
+        AcquisitionROI {
+            id: None,
+            panorama_id: None,
+            roi_type: None,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct ROIPoint {
-    id: String,
-    acquisition_roi_id: String,
-    order_number: i16,
-    slide_x_pos_um: f64,
-    slide_y_pos_um: f64,
-    panorama_pixel_x_pos: i32,
-    panorama_pixel_y_pos: i32,
+    id: Option<String>,
+    acquisition_roi_id: Option<String>,
+    order_number: Option<i16>,
+    slide_x_pos_um: Option<f64>,
+    slide_y_pos_um: Option<f64>,
+    panorama_pixel_x_pos: Option<i32>,
+    panorama_pixel_y_pos: Option<i32>,
+}
+
+impl ROIPoint {
+    pub fn new() -> ROIPoint {
+        ROIPoint {
+            id: None,
+            acquisition_roi_id: None,
+            order_number: None,
+            slide_x_pos_um: None,
+            slide_y_pos_um: None,
+            panorama_pixel_x_pos: None,
+            panorama_pixel_y_pos: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -288,12 +334,46 @@ pub enum ParserState {
     ProcessingImageFormat,
     ProcessingPixelScaleCoef,
     ProcessingAcquisition,
+    ProcessingAblationPower,
+    ProcessingAblationDistanceBetweenShotsX,
+    ProcessingAblationDistanceBetweenShotsY,
+    ProcessingAblationFrequency,
+    ProcessingAcquisitionROIID,
+    ProcessingSignalType,
+    ProcessingDualCountStart,
+    ProcessingDataStartOffset,
+    ProcessingDataEndOffset,
+    ProcessingStartTimeStamp,
+    ProcessingEndTimeStamp,
+    ProcessingAfterAblationImageEndOffset,
+    ProcessingAfterAblationImageStartOffset,
+    ProcessingBeforeAblationImageEndOffset,
+    ProcessingBeforeAblationImageStartOffset,
+    ProcessingROIStartXPosUm,
+    ProcessingROIStartYPosUm,
+    ProcessingROIEndXPosUm,
+    ProcessingROIEndYPosUm,
+    ProcessingMovementType,
+    ProcessingSegmentDataFormat,
+    ProcessingValueBytes,
+    ProcessingMaxY,
+    ProcessingMaxX,
+    ProcessingPlumeStart,
+    ProcessingPlumeEnd,
+    ProcessingTemplate,
     ProcessingAcquisitionChannel,
     ProcessingChannelName,
     ProcessingOrderNumber,
     ProcessingAcquisitionID,
     ProcessingChannelLabel,
     ProcessingAcquisitionROI,
+    ProcessingPanoramaID,
+    ProcessingROIType,
+    ProcessingROIPoint,
+    ProcessingSlideXPosUm,
+    ProcessingSlideYPosUm,
+    ProcessingPanoramaPixelXPos,
+    ProcessingPanoramaPixelYPos,
     ProcessingPanorama,
     Processing,
     Error,
@@ -312,6 +392,8 @@ pub struct MCDParser {
     pub(crate) current_panorama: Option<Panorama>,
     pub(crate) current_acquisition_channel: Option<AcquisitionChannel>,
     pub(crate) current_acquisition: Option<Acquisition>,
+    pub(crate) current_acquisition_roi: Option<AcquisitionROI>,
+    pub(crate) current_roi_point: Option<ROIPoint>,
 }
 
 impl MCDParser {
@@ -325,6 +407,8 @@ impl MCDParser {
             current_panorama: None,
             current_acquisition_channel: None,
             current_acquisition: None,
+            current_acquisition_roi: None,
+            current_roi_point: None,
         }
     }
 
@@ -360,8 +444,12 @@ impl MCDParser {
                     self.state = ParserState::ProcessingPanorama
                 }
                 b"AcquisitionROI" => {
-                    self.current_panorama = Some(Panorama::new());
+                    self.current_acquisition_roi = Some(AcquisitionROI::new());
                     self.state = ParserState::ProcessingAcquisitionROI
+                }
+                b"ROIPoint" => {
+                    self.current_roi_point = Some(ROIPoint::new());
+                    self.state = ParserState::ProcessingROIPoint
                 }
                 b"AcquisitionChannel" => {
                     self.current_acquisition_channel = Some(AcquisitionChannel::new());
@@ -399,6 +487,39 @@ impl MCDParser {
                 b"OrderNumber" => self.sub_state = ParserState::ProcessingOrderNumber,
                 b"AcquisitionID" => self.sub_state = ParserState::ProcessingAcquisitionID,
                 b"ChannelLabel" => self.sub_state = ParserState::ProcessingChannelLabel,
+                b"AblationPower" => self.sub_state = ParserState::ProcessingAblationPower,
+                b"AblationDistanceBetweenShotsX" => self.sub_state = ParserState::ProcessingAblationDistanceBetweenShotsX,
+                b"AblationDistanceBetweenShotsY" => self.sub_state = ParserState::ProcessingAblationDistanceBetweenShotsY,
+                b"AblationFrequency" => self.sub_state = ParserState::ProcessingAblationFrequency,
+                b"AcquisitionROIID" => self.sub_state = ParserState::ProcessingAcquisitionROIID,
+                b"SignalType" => self.sub_state = ParserState::ProcessingSignalType,
+                b"DualCountStart" => self.sub_state = ParserState::ProcessingDualCountStart,
+                b"DataStartOffset" => self.sub_state = ParserState::ProcessingDataStartOffset,
+                b"DataEndOffset" => self.sub_state = ParserState::ProcessingDataEndOffset,
+                b"StartTimeStamp" => self.sub_state = ParserState::ProcessingStartTimeStamp,
+                b"EndTimeStamp" => self.sub_state = ParserState::ProcessingEndTimeStamp,
+                b"AfterAblationImageEndOffset" => self.sub_state = ParserState::ProcessingAfterAblationImageEndOffset,
+                b"AfterAblationImageStartOffset" => self.sub_state = ParserState::ProcessingAfterAblationImageStartOffset,
+                b"BeforeAblationImageEndOffset" => self.sub_state = ParserState::ProcessingBeforeAblationImageEndOffset,
+                b"BeforeAblationImageStartOffset" => self.sub_state = ParserState::ProcessingBeforeAblationImageStartOffset,
+                b"ROIStartXPosUm" => self.sub_state = ParserState::ProcessingROIStartXPosUm,
+                b"ROIStartYPosUm" => self.sub_state = ParserState::ProcessingROIStartYPosUm,
+                b"ROIEndXPosUm" => self.sub_state = ParserState::ProcessingROIEndXPosUm,
+                b"ROIEndYPosUm" => self.sub_state = ParserState::ProcessingROIEndYPosUm,
+                b"MovementType" => self.sub_state = ParserState::ProcessingMovementType,
+                b"SegmentDataFormat" => self.sub_state = ParserState::ProcessingSegmentDataFormat,
+                b"ValueBytes" => self.sub_state = ParserState::ProcessingValueBytes,
+                b"MaxY" => self.sub_state = ParserState::ProcessingMaxY,
+                b"MaxX" => self.sub_state = ParserState::ProcessingMaxX,
+                b"PlumeStart" => self.sub_state = ParserState::ProcessingPlumeStart,
+                b"PlumeEnd" => self.sub_state = ParserState::ProcessingPlumeEnd,
+                b"Template" => self.sub_state = ParserState::ProcessingTemplate,
+                b"PanoramaID" => self.sub_state = ParserState::ProcessingPanoramaID,
+                b"ROIType" => self.sub_state = ParserState::ProcessingROIType,
+                b"SlideXPosUm" => self.sub_state = ParserState::ProcessingSlideXPosUm,
+                b"SlideYPosUm" => self.sub_state = ParserState::ProcessingSlideYPosUm,
+                b"PanoramaPixelXPos" => self.sub_state = ParserState::ProcessingPanoramaPixelXPos,
+                b"PanoramaPixelYPos" => self.sub_state = ParserState::ProcessingPanoramaPixelYPos,
                 _ => match std::str::from_utf8(e.local_name()) {
                     Ok(name) => {
                         self.errors
@@ -425,6 +546,24 @@ impl MCDParser {
                         .unwrap()
                         .acquisition_channels
                         .push(acquisition_channel);
+
+                    self.state = ParserState::Processing
+                }
+                b"Acquisition" => {
+                    let acquisition = self.current_acquisition.take().unwrap();
+                    self.current_mcd.as_mut().unwrap().acquisitions.push(acquisition);
+
+                    self.state = ParserState::Processing
+                }
+                b"AcquisitionROI" => {
+                    let acquisition_roi = self.current_acquisition_roi.take().unwrap();
+                    self.current_mcd.as_mut().unwrap().acquisition_rois.push(acquisition_roi);
+
+                    self.state = ParserState::Processing
+                }
+                b"ROIPoint" => {
+                    let roi_point = self.current_roi_point.take().unwrap();
+                    self.current_mcd.as_mut().unwrap().roi_points.push(roi_point);
 
                     self.state = ParserState::Processing
                 }
@@ -679,43 +818,216 @@ impl MCDParser {
                     ParserState::ProcessingAcquisitionChannel => {
                         let ref mut acquisition_channel =
                             self.current_acquisition_channel.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
-                                acquisition_channel.id = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                acquisition_channel.id = Some(text.to_owned())
                             }
                             ParserState::ProcessingChannelName => {
-                                acquisition_channel.channel_name = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                acquisition_channel.channel_name = Some(text.to_owned())
                             }
                             ParserState::ProcessingOrderNumber => {
-                                acquisition_channel.order_number = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                acquisition_channel.order_number = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingAcquisitionID => {
-                                acquisition_channel.acquisition_id = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                acquisition_channel.acquisition_id = Some(text.to_owned())
                             }
                             ParserState::ProcessingChannelLabel => {
-                                acquisition_channel.channel_label = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                acquisition_channel.channel_label = Some(text.to_owned())
+                            }
+                            _ => {}
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingAcquisition => {
+                        let ref mut acquisition = self.current_acquisition.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => acquisition.id = Some(text.to_owned()),
+                            ParserState::ProcessingDescription => {
+                                acquisition.description = Some(text.to_owned())
+                            }
+                            ParserState::ProcessingAblationPower => {
+                                acquisition.ablation_power = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAblationDistanceBetweenShotsX => {
+                                acquisition.ablation_distance_between_shots_x =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAblationDistanceBetweenShotsY => {
+                                acquisition.ablation_distance_between_shots_y =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAblationFrequency => {
+                                acquisition.ablation_frequency =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAcquisitionROIID => {
+                                acquisition.acquisition_roi_id =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOrderNumber => {
+                                acquisition.order_number =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingSignalType => {
+                                acquisition.signal_type =
+                                    Some(text.to_owned())
+                            }
+                            ParserState::ProcessingDualCountStart => {
+                                acquisition.dual_count_start =
+                                    Some(text.to_owned())
+                            }
+                            ParserState::ProcessingDataStartOffset => {
+                                acquisition.data_start_offset =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingDataEndOffset => {
+                                acquisition.data_end_offset =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingStartTimeStamp => {
+                                acquisition.start_timestamp =
+                                    Some(text.to_owned())
+                            }
+                            ParserState::ProcessingEndTimeStamp => {
+                                acquisition.end_timestamp =
+                                    Some(text.to_owned())
+                            }
+                            ParserState::ProcessingAfterAblationImageEndOffset => {
+                                acquisition.after_ablation_image_end_offset =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAfterAblationImageStartOffset => {
+                                acquisition.after_ablation_image_start_offset =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingBeforeAblationImageEndOffset => {
+                                acquisition.before_ablation_image_end_offset =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingBeforeAblationImageStartOffset => {
+                                acquisition.before_ablation_image_start_offset =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingROIStartXPosUm => {
+                                acquisition.roi_start_x_pos_um =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingROIStartYPosUm => {
+                                acquisition.roi_start_y_pos_um =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingROIEndXPosUm => {
+                                acquisition.roi_end_x_pos_um =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingROIEndYPosUm => {
+                                acquisition.roi_end_y_pos_um =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingMovementType => {
+                                acquisition.movement_type =
+                                    Some(text.to_owned())
+                            }
+                            ParserState::ProcessingSegmentDataFormat => {
+                                match &text as &str {
+                                    "Float" =>  acquisition.segment_data_format =
+                                            Some(DataFormat::Float),
+                                    _ => {}
+                                }
+                                
+                            }
+                            ParserState::ProcessingValueBytes => {
+                                acquisition.value_bytes =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingMaxX => {
+                                acquisition.max_x =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingMaxY => {
+                                acquisition.max_y =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingPlumeStart => {
+                                acquisition.plume_start =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingPlumeEnd => {
+                                acquisition.plume_end =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTemplate => {
+                                acquisition.template =
+                                    Some(text.to_owned())
+                            }
+                            _ => {}
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+
+                    ParserState::ProcessingAcquisitionROI => {
+                        let ref mut acquisition_roi =
+                            self.current_acquisition_roi.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                acquisition_roi.id = Some(text.to_owned())
+                            }
+                            ParserState::ProcessingPanoramaID => {
+                                acquisition_roi.panorama_id = Some(text.to_owned())
+                            }
+                            ParserState::ProcessingROIType => {
+                                match &text as &str {
+                                    "Acquisition" =>  acquisition_roi.roi_type =
+                                            Some(ROIType::Acquisition),
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingROIPoint => {
+                        let ref mut roi_point =
+                            self.current_roi_point.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                roi_point.id = Some(text.to_owned())
+                            }
+                            ParserState::ProcessingAcquisitionROIID => {
+                                roi_point.acquisition_roi_id = Some(text.to_owned())
+                            }
+                            ParserState::ProcessingOrderNumber => {
+                                roi_point.order_number = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingSlideXPosUm => {
+                                roi_point.slide_x_pos_um = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingSlideYPosUm => {
+                                roi_point.slide_y_pos_um = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingPanoramaPixelXPos => {
+                                roi_point.panorama_pixel_x_pos = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingPanoramaPixelYPos => {
+                                roi_point.panorama_pixel_y_pos = Some(text.parse().unwrap())
                             }
                             _ => {}
                         }
@@ -738,6 +1050,7 @@ impl MCDParser {
 mod tests {
     use super::*;
 
+    use std::time::Instant;
     use quick_xml::events::{attributes::Attribute, Event};
     use std::fs::File;
     use std::io::prelude::*;
@@ -747,6 +1060,8 @@ mod tests {
 
     #[test]
     fn it_works() {
+
+        let mut parser = MCDParser::new();let start = Instant::now();
         let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
 
         let mut file = File::open(filename).unwrap();
@@ -816,7 +1131,6 @@ mod tests {
         let mut reader = quick_xml::Reader::from_str(&combined_xml);
         let mut buf = Vec::with_capacity(BUF_SIZE);
 
-        let mut parser = MCDParser::new();
 
         loop {
             match reader.read_event(&mut buf) {
@@ -850,6 +1164,8 @@ mod tests {
             buf.clear();
         }
 
+        let duration = start.elapsed();
+
         //while parser.has_errors() {
         //    println!("{}", parser.pop_error_front().unwrap());
         //}
@@ -858,9 +1174,13 @@ mod tests {
         println!("{:?}", parser.current_mcd.as_ref().unwrap().panoramas);
         println!(
             "{:?}",
-            parser.current_mcd.as_ref().unwrap().acquisition_channels
+            parser.current_mcd.as_ref().unwrap().roi_points[0]
         );
         std::fs::write("tmp.xml", combined_xml).expect("Unable to write file");
+
+        std::fs::write("tmp.png", parser.current_mcd.as_ref().unwrap().panoramas[0].get_image(&mut file).unwrap()).expect("Unable to write file");
+
+        println!("Time elapsed when parsing is: {:?}", duration);
 
         //println!("{}", combined_xml);
 
