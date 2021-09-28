@@ -1,11 +1,16 @@
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use quick_xml::events::Event;
 
-use crate::{
-    Acquisition, AcquisitionChannel, AcquisitionROI, DataFormat, ImageFormat, Panorama, ROIPoint,
-    ROIType, MCD,
+use super::{
+    AcquisitionXML, Acquisition, AcquisitionROI, AcquisitionChannel, DataFormat, ImageFormat, Slide, Panorama, PanoramaXML,
+    MCD, ROIPoint, SlideXML, AcquisitionChannelXML, ROIType
 };
+
+
+use std::io::prelude::*;
+
+
 
 #[derive(Clone, Copy, Debug)]
 pub enum ParserState {
@@ -83,175 +88,33 @@ pub enum ParserState {
     Finished,
 }
 
-struct AcquisitionChannelXML {
-    id: Option<String>,
-    channel_name: Option<String>,
-    order_number: Option<i16>,
-    acquisition_id: Option<String>,
-    channel_label: Option<String>,
-}
+pub struct MCDParser<T: Seek + Read> {
+    pub(crate) current_mcd: Option<MCD<T>>,
 
-impl AcquisitionChannelXML {
-    pub fn new() -> AcquisitionChannelXML {
-        AcquisitionChannelXML {
-            id: None,
-            channel_name: None,
-            order_number: None,
-            acquisition_id: None,
-            channel_label: None,
-        }
-    }
-}
-
-impl From<AcquisitionChannelXML> for AcquisitionChannel {
-    fn from(channel: AcquisitionChannelXML) -> Self {
-        AcquisitionChannel {
-            id: channel.id.expect("ID is required"),
-            channel_name: channel.channel_name.expect("ChannelName is required"),
-            order_number: channel.order_number.expect("OrderNumber is required"),
-            acquisition_id: channel.acquisition_id.expect("AcquisitionID is required"),
-            channel_label: channel.channel_label.expect("ChannelLabel is required"),
-        }
-    }
-}
-
-
-#[derive(Debug)]
-pub struct AcquisitionXML {
-    id: Option<String>,
-    description: Option<String>,
-    ablation_power: Option<f64>,
-    ablation_distance_between_shots_x: Option<f64>,
-    ablation_distance_between_shots_y: Option<f64>,
-    ablation_frequency: Option<f64>,
-    acquisition_roi_id: Option<i16>,
-    order_number: Option<i16>,
-    signal_type: Option<String>,
-    dual_count_start: Option<String>,
-    data_start_offset: Option<i64>,
-    data_end_offset: Option<i64>,
-    start_timestamp: Option<String>,
-    end_timestamp: Option<String>,
-    after_ablation_image_start_offset: Option<i64>,
-    after_ablation_image_end_offset: Option<i64>,
-    before_ablation_image_start_offset: Option<i64>,
-    before_ablation_image_end_offset: Option<i64>,
-    roi_start_x_pos_um: Option<f64>,
-    roi_start_y_pos_um: Option<f64>,
-    roi_end_x_pos_um: Option<f64>,
-    roi_end_y_pos_um: Option<f64>,
-    movement_type: Option<String>,
-    segment_data_format: Option<DataFormat>,
-    value_bytes: Option<u8>,
-    max_x: Option<i32>,
-    max_y: Option<i32>,
-    plume_start: Option<i32>,
-    plume_end: Option<i32>,
-    template: Option<String>,
-}
-
-impl AcquisitionXML {
-
-    pub fn new() -> AcquisitionXML {
-        AcquisitionXML {
-            id: None,
-            description: None,
-            ablation_power: None,
-            ablation_distance_between_shots_x: None,
-            ablation_distance_between_shots_y: None,
-            ablation_frequency: None,
-            acquisition_roi_id: None,
-            order_number: None,
-            signal_type: None,
-            dual_count_start: None,
-            data_start_offset: None,
-            data_end_offset: None,
-            start_timestamp: None,
-            end_timestamp: None,
-            after_ablation_image_start_offset: None,
-            after_ablation_image_end_offset: None,
-            before_ablation_image_start_offset: None,
-            before_ablation_image_end_offset: None,
-            roi_start_x_pos_um: None,
-            roi_start_y_pos_um: None,
-            roi_end_x_pos_um: None,
-            roi_end_y_pos_um: None,
-            movement_type: None,
-            segment_data_format: None,
-            value_bytes: None,
-            max_x: None,
-            max_y: None,
-            plume_start: None,
-            plume_end: None,
-            template: None,
-        }
-    }
-}
-
-
-impl From<AcquisitionXML> for Acquisition {
-    fn from(acquisition: AcquisitionXML) -> Self {
-        Acquisition {
-            id: acquisition.id.unwrap(),
-            description: acquisition.description.unwrap(),
-            ablation_power: acquisition.ablation_power.unwrap(),
-            ablation_distance_between_shots_x: acquisition.ablation_distance_between_shots_x.unwrap(),
-            ablation_distance_between_shots_y: acquisition.ablation_distance_between_shots_y.unwrap(),
-            ablation_frequency: acquisition.ablation_frequency.unwrap(),
-            acquisition_roi_id: acquisition.acquisition_roi_id.unwrap(),
-            order_number: acquisition.order_number.unwrap(),
-            signal_type: acquisition.signal_type.unwrap(),
-            dual_count_start: acquisition.dual_count_start.unwrap(),
-            data_start_offset: acquisition.data_start_offset.unwrap(),
-            data_end_offset: acquisition.data_end_offset.unwrap(),
-            start_timestamp: acquisition.start_timestamp.unwrap(),
-            end_timestamp: acquisition.end_timestamp.unwrap(),
-            after_ablation_image_start_offset: acquisition.after_ablation_image_start_offset.unwrap(),
-            after_ablation_image_end_offset: acquisition.after_ablation_image_end_offset.unwrap(),
-            before_ablation_image_start_offset: acquisition.before_ablation_image_start_offset.unwrap(),
-            before_ablation_image_end_offset: acquisition.before_ablation_image_end_offset.unwrap(),
-            roi_start_x_pos_um: acquisition.roi_start_x_pos_um.unwrap(),
-            roi_start_y_pos_um: acquisition.roi_start_y_pos_um.unwrap(),
-            roi_end_x_pos_um: acquisition.roi_end_x_pos_um.unwrap(),
-            roi_end_y_pos_um: acquisition.roi_end_y_pos_um.unwrap(),
-            movement_type: acquisition.movement_type.unwrap(),
-            segment_data_format: acquisition.segment_data_format.unwrap(),
-            value_bytes: acquisition.value_bytes.unwrap(),
-            max_x: acquisition.max_x.unwrap(),
-            max_y: acquisition.max_y.unwrap(),
-            plume_start: acquisition.plume_start.unwrap(),
-            plume_end: acquisition.plume_end.unwrap(),
-            template: acquisition.template.unwrap(),
-
-            channels: Vec::new(),
-        }
-    }
-}
-
-
-pub struct MCDParser {
     state: ParserState,
     sub_state: ParserState,
     //pub(super) history: Vec<String>,
     errors: std::collections::VecDeque<String>,
 
-    current_mcd: Option<MCD>,
-
-    panoramas: HashMap<String, Panorama>,
-    acquisitions: HashMap<String, Acquisition>,
+    panoramas: HashMap<u16, Panorama>,
+    acquisitions: HashMap<u16, Acquisition>,
     acquisition_channels: Vec<AcquisitionChannel>,
     acquisition_rois: Vec<AcquisitionROI>,
 
-    current_panorama: Option<Panorama>,
+    roi_points: Vec<ROIPoint>,
+
+    current_slide: Option<SlideXML>,
+    current_panorama: Option<PanoramaXML>,
     current_acquisition_channel: Option<AcquisitionChannelXML>,
     current_acquisition: Option<AcquisitionXML>,
     current_acquisition_roi: Option<AcquisitionROI>,
     current_roi_point: Option<ROIPoint>,
 }
 
-impl MCDParser {
-    pub fn new() -> MCDParser {
+impl<T: Seek + Read> MCDParser<T> {
+    pub fn new(mcd: MCD<T>) -> MCDParser<T> {
         MCDParser {
+            current_mcd: Some(mcd), 
             state: ParserState::Start,
             sub_state: ParserState::Start,
             errors: std::collections::VecDeque::new(),
@@ -261,7 +124,10 @@ impl MCDParser {
             acquisition_channels: Vec::new(),
             acquisition_rois: Vec::new(),
 
-            current_mcd: None,
+            // TODO: Do we need this? 
+            roi_points: Vec::new(),
+
+            current_slide: None,
             current_panorama: None,
             current_acquisition_channel: None,
             current_acquisition: None,
@@ -270,7 +136,7 @@ impl MCDParser {
         }
     }
 
-    pub fn get_mcd(&mut self) -> MCD {
+    pub fn get_mcd(&mut self) -> MCD<T> {
         let mut mcd = self
             .current_mcd
             .take()
@@ -288,13 +154,13 @@ impl MCDParser {
         // Create map with Arc for sharing pointers with Panorama
         let mut acquisitions = HashMap::new();
         for (id, acquisition) in self.acquisitions.drain() {
-            acquisitions.insert(id, Arc::new(acquisition));
+            acquisitions.insert(id, acquisition);
         }
 
         // Add acquisition to panorama
         for roi in &self.acquisition_rois {
             let acquisition = acquisitions
-                .get(roi.id.as_ref().expect("Must have ID for AcquisitionROI"))
+                .remove(roi.id.as_ref().expect("Must have ID for AcquisitionROI"))
                 .expect("Should have Acquisition with same ID as AcquisitionROI");
 
             let panorama = self
@@ -306,15 +172,19 @@ impl MCDParser {
                 )
                 .expect("Should have Panorama with same ID as AcquisitionROI");
 
-                panorama.acquisitions.insert(acquisition.id.clone(), acquisition.clone());
+                panorama.acquisitions.insert(acquisition.id, acquisition);
         }
 
         for (id, panorama) in self.panoramas.drain() {
-            mcd.panoramas.insert(id, panorama);
+            //mcd.panoramas.insert(id, panorama);
+            let slide_id = panorama.slide_id;
+
+            let slide = mcd.slides.get_mut(&slide_id).expect(&format!("Missing Slide with ID {}", slide_id));
+            slide.panoramas.insert(id, panorama);
         }
 
         // Update the acquisitions
-        mcd.acquisitions = acquisitions;
+        //mcd.acquisitions = acquisitions;
 
         mcd
     }
@@ -340,14 +210,15 @@ impl MCDParser {
             Event::Start(e) | Event::Empty(e) => match e.local_name() {
                 b"MCDSchema" => {
                     // TODO: get xmlns
-                    self.current_mcd = Some(MCD::new(""))
+                    //self.current_mcd = Some()
                 }
                 b"Slide" => {
                     //Wself.current_mcd.unwrap().slide = Some(Slide::new());
+                    self.current_slide = Some(SlideXML::new());
                     self.state = ParserState::ProcessingSlide
                 }
                 b"Panorama" => {
-                    self.current_panorama = Some(Panorama::new());
+                    self.current_panorama = Some(PanoramaXML::new());
                     self.state = ParserState::ProcessingPanorama
                 }
                 b"AcquisitionROI" => {
@@ -452,10 +323,18 @@ impl MCDParser {
                 },
             },
             Event::End(e) => match e.local_name() {
+                b"Slide" => {
+                    let slide = self.current_slide.take().unwrap();
+                    self.current_mcd.as_mut().unwrap().slides
+                        .insert(slide.id.unwrap(), slide.into());
+
+                    self.state = ParserState::Processing
+                }
                 b"Panorama" => {
                     let panorama = self.current_panorama.take().unwrap();
+                    let panorama_id = panorama.id.as_ref().unwrap();
                     self.panoramas
-                        .insert(panorama.id.as_ref().unwrap().clone(), panorama);
+                        .insert(panorama_id.clone(), panorama.into());
 
                     self.state = ParserState::Processing
                 }
@@ -483,10 +362,7 @@ impl MCDParser {
                 }
                 b"ROIPoint" => {
                     let roi_point = self.current_roi_point.take().unwrap();
-                    self.current_mcd
-                        .as_mut()
-                        .unwrap()
-                        .roi_points
+                    self.roi_points
                         .push(roi_point);
 
                     self.state = ParserState::Processing
@@ -508,15 +384,14 @@ impl MCDParser {
             Event::Text(e) => {
                 match self.state {
                     ParserState::ProcessingSlide => {
-                        let ref mut slide = self.current_mcd.as_mut().unwrap().slide;
+                        let ref mut slide = self.current_slide.as_mut().unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
-                                slide.id = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                let id = std::str::from_utf8(&e.unescaped().unwrap()).unwrap().to_owned();
+                                let id = id.parse().unwrap();
+
+                                slide.id = Some(id)
                             }
                             ParserState::ProcessingUID => {
                                 slide.uid = Some(
@@ -603,25 +478,25 @@ impl MCDParser {
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
-                                panorama.id = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                let id = std::str::from_utf8(&e.unescaped().unwrap())
+                                .unwrap()
+                                .to_owned();
+
+                                panorama.id = Some(id.parse().unwrap())
                             }
                             ParserState::ProcessingSlideID => {
-                                panorama.slide_id = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                let id = std::str::from_utf8(&e.unescaped().unwrap())
+                                .unwrap()
+                                .to_owned();
+
+                                panorama.slide_id = Some(id.parse().unwrap())
                             }
                             ParserState::ProcessingDescription => {
-                                panorama.description = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                let id = std::str::from_utf8(&e.unescaped().unwrap())
+                                .unwrap()
+                                .to_owned();
+
+                                panorama.description = Some(id.parse().unwrap())
                             }
                             ParserState::ProcessingSlideX1PosUm => {
                                 panorama.slide_x1_pos_um = Some(
@@ -753,7 +628,7 @@ impl MCDParser {
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
-                                acquisition_channel.id = Some(text.to_owned())
+                                acquisition_channel.id = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingChannelName => {
                                 acquisition_channel.channel_name = Some(text.to_owned())
@@ -762,7 +637,7 @@ impl MCDParser {
                                 acquisition_channel.order_number = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingAcquisitionID => {
-                                acquisition_channel.acquisition_id = Some(text.to_owned())
+                                acquisition_channel.acquisition_id = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingChannelLabel => {
                                 acquisition_channel.channel_label = Some(text.to_owned())
@@ -785,7 +660,7 @@ impl MCDParser {
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => acquisition.id = Some(text.to_owned()),
+                            ParserState::ProcessingID => acquisition.id = Some(text.parse().unwrap()),
                             ParserState::ProcessingDescription => {
                                 acquisition.description = Some(text.to_owned())
                             }
@@ -903,9 +778,9 @@ impl MCDParser {
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => acquisition_roi.id = Some(text.to_owned()),
+                            ParserState::ProcessingID => acquisition_roi.id = Some(text.parse().unwrap()),
                             ParserState::ProcessingPanoramaID => {
-                                acquisition_roi.panorama_id = Some(text.to_owned())
+                                acquisition_roi.panorama_id = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingROIType => match &text as &str {
                                 "Acquisition" => {
@@ -931,9 +806,9 @@ impl MCDParser {
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => roi_point.id = Some(text.to_owned()),
+                            ParserState::ProcessingID => roi_point.id = Some(text.parse().unwrap()),
                             ParserState::ProcessingAcquisitionROIID => {
-                                roi_point.acquisition_roi_id = Some(text.to_owned())
+                                roi_point.acquisition_roi_id = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingOrderNumber => {
                                 roi_point.order_number = Some(text.parse().unwrap())
