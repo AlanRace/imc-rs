@@ -1,4 +1,5 @@
 mod parser;
+mod transform;
 
 use std::fmt;
 
@@ -605,6 +606,9 @@ mod tests {
     use std::fs::File;
     use std::time::Instant;
 
+    use nalgebra::Vector3;
+    use crate::transform::AffineTransform;
+
     #[test]
     fn it_works() {
         let start = Instant::now();
@@ -634,6 +638,18 @@ mod tests {
         //    .expect("Unable to write file");
 
         println!("Time elapsed when parsing is: {:?}", duration);
+
+        let mut points = Vec::new();
+        points.push(Vector3::new(20, 10, 0));
+        points.push(Vector3::new(20, 10, 0));
+        points.push(Vector3::new(20, 10, 0));
+
+        let mut points2 = Vec::new();
+        points2.push(Vector3::new(20, 10, 0));
+        points2.push(Vector3::new(20, 10, 0));
+        points2.push(Vector3::new(20, 10, 0));
+
+        let tranform = AffineTransform::from_points(points, points2);
 
         //println!("{}", combined_xml);
     }
