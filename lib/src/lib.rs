@@ -105,6 +105,32 @@ impl<T: Seek + Read> MCD<T> {
         self.slides.get(id)
     }
 
+    pub fn get_channels(&self) -> Vec<&AcquisitionChannel> {
+        let mut channels = HashMap::new();
+
+        // This should be unnecessary - hopefully there is only one set of channels per dataset?
+        for (_, slide) in &self.slides {
+            for panorama in slide.get_panoramas() {
+                for acquisition in panorama.get_acquisitions() {
+                    for channel in acquisition.get_channels() {
+                        if !channels.contains_key(channel.get_name()) {
+                            channels.insert(channel.get_name(), channel);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut ordered_channels = Vec::new();
+        for (_, channel) in channels.drain() {
+            ordered_channels.push(channel);
+        }
+
+        ordered_channels.sort_by(|a, b| a.order_number.cmp(&b.order_number));
+
+        ordered_channels
+    }
+
     pub fn parse(reader: T, location: &str) -> Self {
         //let mut file = File::open(filename).unwrap();
         let mcd = MCD::new(reader, location);
@@ -233,6 +259,13 @@ impl<T: Seek + Read> Print for MCD<T> {
             slide.print(writer, indent + 1)?;
         }
 
+        let channels = self.get_channels();
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "Channels", 25)?;
+        for channel in channels {
+            writeln!(writer, "{0: <2} | {1: <10} | {2: <10}", channel.get_order_number(), channel.get_name(), channel.get_label())?;
+        }
+
         Ok(())
     }
 }
@@ -284,23 +317,41 @@ impl Slide {
     pub fn get_panorama(&self, id: &u16) -> Option<&Panorama> {
         self.panoramas.get(id)
     }
+
+    // Get panoramas ordered by ID
+    pub fn get_panoramas(&self) -> Vec<&Panorama> {
+        let mut panoramas = Vec::new();
+
+        let ids = self.get_panorama_ids();
+        for id in ids {
+            panoramas.push(self.get_panorama(&id).expect("Should only be getting panoramas that exist"));
+        }
+
+        panoramas
+    }
 }
 
 
 
 impl Print for Slide {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        writeln!(writer, "{:indent$}Slide", "", indent=indent)?;
-        writeln!(writer, "{:indent$}ID: {}", "", self.id, indent=indent+1)?;
-        writeln!(writer, "{:indent$}UID: {}", "", self.uid, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Description: {}", "", self.description, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Filename: {}", "", self.filename, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Type: {}", "", self.slide_type, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Dimensions: {} μm x {} μm ", "", self.width_um, self.height_um, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Image File: {}", "", self.image_file, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Software Version: {}", "", self.sw_version, indent=indent+1)?;
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "Slide", 36)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "ID", self.id, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "UID", self.uid, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "Description", self.description, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "Filename", self.filename, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "Type", self.slide_type, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {} μm x {} μm ", "", "Dimensions", self.width_um, self.height_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "Image File", self.image_file, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <16} | {}", "", "Software Version", self.sw_version, indent=indent)?;
 
-        writeln!(writer, "{} panorama(s) with ids: {:?}", self.panoramas.len(), self.get_panorama_ids())?;
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "", 36)?;
+
+        writeln!(writer, "{:indent$}{} panorama(s) with ids: {:?}", "", self.panoramas.len(), self.get_panorama_ids(), indent=indent+1)?;
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "", 36)?;
 
         Ok(())
     }
@@ -369,6 +420,19 @@ impl Panorama {
     pub fn get_acquisition(&self, id: &u16) -> Option<&Acquisition> {
         self.acquisitions.get(id)
     }
+
+
+    // Get acquisitions ordered by ID
+    pub fn get_acquisitions(&self) -> Vec<&Acquisition> {
+        let mut acquisitions = Vec::new();
+
+        let ids = self.get_acquisition_ids();
+        for id in ids {
+            acquisitions.push(self.get_acquisition(&id).expect("Should only be getting acquisitions that exist"));
+        }
+
+        acquisitions
+    }
 }
 
 
@@ -408,6 +472,20 @@ pub struct AcquisitionChannel {
     channel_label: String,
 }
 
+impl AcquisitionChannel {
+    fn get_id(&self) -> u16 {
+        self.id
+    }
+    fn get_name(&self) -> &str {
+        &self.channel_name
+    }
+    fn get_order_number(&self) -> i16 {
+        self.order_number
+    }
+    fn get_label(&self) -> &str {
+        &self.channel_label
+    }
+}
 
 
 #[derive(Debug)]
@@ -473,6 +551,10 @@ impl Acquisition {
             self.after_ablation_image_start_offset,
             self.after_ablation_image_end_offset,
         )
+    }
+
+    pub fn get_channels(&self) -> &Vec<AcquisitionChannel> {
+        &self.channels
     }
 }
 
