@@ -439,19 +439,24 @@ impl Panorama {
 
 impl Print for Panorama {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        writeln!(writer, "{:indent$}Panorama", "", indent=indent)?;
-        writeln!(writer, "{:indent$}ID: {}", "", self.id, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Slide ID: {}", "", self.slide_id, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Description: {}", "", self.description, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Slide coordinates:", "", indent=indent+1)?;
-        writeln!(writer, "{:indent$}({} μm, {} μm)", "", self.slide_x1_pos_um, self.slide_y1_pos_um, indent=indent+2)?;
-        writeln!(writer, "{:indent$}({} μm, {} μm)", "", self.slide_x2_pos_um, self.slide_y2_pos_um, indent=indent+2)?;
-        writeln!(writer, "{:indent$}({} μm, {} μm)", "", self.slide_x3_pos_um, self.slide_y3_pos_um, indent=indent+2)?;
-        writeln!(writer, "{:indent$}({} μm, {} μm)", "", self.slide_x4_pos_um, self.slide_y4_pos_um, indent=indent+2)?;
-        writeln!(writer, "{:indent$}Dimensions (pixels): {} x {}", "", self.pixel_width, self.pixel_height, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Pixel scale coefficient: {}", "", self.pixel_scale_coef, indent=indent+1)?;
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "Panorama", 42)?;
+        writeln!(writer, "{:indent$}{: <20} | {}", "", "ID", self.id, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | {}", "", "Slide ID", self.slide_id, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | {}", "", "Description", self.description, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "Slide coordinates", self.slide_x1_pos_um, self.slide_y1_pos_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "", self.slide_x2_pos_um, self.slide_y2_pos_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "", self.slide_x3_pos_um, self.slide_y3_pos_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "", self.slide_x4_pos_um, self.slide_y4_pos_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | {} x {}", "", "Dimensions (pixels)", self.pixel_width, self.pixel_height, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <20} | {}", "", "Pixel scale coef", self.pixel_scale_coef, indent=indent)?;
+        
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "", 42)?;
 
         writeln!(writer, "{} acquisition(s) with ids: {:?}", self.acquisitions.len(), self.get_acquisition_ids())?;
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "", 42)?;
 
         Ok(())
     }
@@ -561,36 +566,26 @@ impl Acquisition {
 
 impl Print for Acquisition {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        writeln!(writer, "{:indent$}Acquisition", "", indent=indent)?;
-        writeln!(writer, "{:indent$}ID: {}", "", self.id, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Description: {}", "", self.description, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Order number: {}", "", self.order_number, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Dimensions (pixels): {} x {}", "", self.max_x, self.max_y, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Distance between shots: {} x {}", "", self.ablation_distance_between_shots_x, self.ablation_distance_between_shots_y, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Signal type: {}", "", self.signal_type, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Ablation power: {}", "", self.ablation_power, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Dual count start: {}", "", self.dual_count_start, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Start timestamp: {}", "", self.start_timestamp, indent=indent+1)?;
-        writeln!(writer, "{:indent$}End timestamp: {}", "", self.end_timestamp, indent=indent+1)?;
-        writeln!(writer, "{:indent$}ROI:", "", indent=indent+1)?;
-        writeln!(writer, "{:indent$}({} μm, {} μm)", "", self.roi_start_x_pos_um, self.roi_start_y_pos_um, indent=indent+2)?;
-        writeln!(writer, "{:indent$}({} μm, {} μm)", "", self.roi_end_x_pos_um, self.roi_end_y_pos_um, indent=indent+2)?;
-        writeln!(writer, "{:indent$}Movement type: {}", "", self.movement_type, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Segment data format: {:?}", "", self.segment_data_format, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Value bytes: {}", "", self.value_bytes, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Plume start: {}", "", self.plume_start, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Plume end: {}", "", self.plume_end, indent=indent+1)?;
-        writeln!(writer, "{:indent$}Template: {}", "", self.template, indent=indent+1)?;
-
-        /*
-        movement_type: String,
-        segment_data_format: DataFormat,
-        value_bytes: u8,
-        max_x: i32,
-        max_y: i32,
-        plume_start: i32,
-        plume_end: i32,
-        template: String,*/
+        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(writer, "{:-^1$}", "Acquisition", 48)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "ID", self.id, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Description", self.description, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Order number", self.order_number, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {} x {}", "", "Dimensions (pixels)", self.max_x, self.max_y, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {} x {}", "", "Distance between shots", self.ablation_distance_between_shots_x, self.ablation_distance_between_shots_y, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Signal type", self.signal_type, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Ablation power", self.ablation_power, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Dual count start", self.dual_count_start, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Start timestamp", self.start_timestamp, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "End timestamp", self.end_timestamp, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | ({:.4} μm, {:.4} μm)", "", "ROI", self.roi_start_x_pos_um, self.roi_start_y_pos_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | ({:.4} μm, {:.4} μm)", "", "", self.roi_end_x_pos_um, self.roi_end_y_pos_um, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Movement type", self.movement_type, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {:?}", "", "Segment data format", self.segment_data_format, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Value bytes", self.value_bytes, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Plume start", self.plume_start, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Plume end", self.plume_end, indent=indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Template", self.template, indent=indent)?;
 
         Ok(())
     }
