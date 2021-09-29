@@ -1,35 +1,118 @@
+extern crate num_traits;
+
+use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector3, Vector2, QR};
 use std::fmt;
-use nalgebra::{DMatrix, VecStorage, Dim, Vector3, Matrix3};
 
 enum Direction {
     ToMoving,
-    ToFixed
+    ToFixed,
 }
 
-pub struct AffineTransform<T: Copy + fmt::Debug + fmt::Display> {
+// Create a trait which captures necessary traits for matrix multiplication
+pub trait TransformScalar:
+    nalgebra::Scalar
+    + num_traits::identities::Zero
+    + num_traits::identities::One
+    + nalgebra::ClosedAdd
+    + nalgebra::ClosedMul
+    + nalgebra::ComplexField
+    + Copy
+{
+}
+impl<T> TransformScalar for T where
+    T: nalgebra::Scalar
+        + num_traits::identities::Zero
+        + num_traits::identities::One
+        + nalgebra::ClosedAdd
+        + nalgebra::ClosedMul
+        + nalgebra::ComplexField
+        + Copy
+{
+}
+
+#[derive(Debug)]
+pub struct AffineTransform<T>
+where
+    T: TransformScalar,
+{
     matrix: Option<Matrix3<T>>,
 }
 
-impl<T: Copy + fmt::Debug + fmt::Display> AffineTransform<T> {
-    pub fn from_points(moving_points: Vec<Vector3<T>>, fixed_points: Vec<Vector3<T>>) -> Self {
-        let mut data: Vec<T> = Vec::with_capacity(moving_points.len()*3);
+fn to_dmatrix<T>(points: Vec<Vector2<T>>) -> DMatrix<T>
+where
+    T: TransformScalar,
+{
+    let mut data: Vec<T> = Vec::with_capacity(points.len() * 3);
 
-        for index in 0..moving_points.len() {
-            let point = moving_points.get(index).expect("Point should be present");
+    for coord in 0..3 {
+        if coord < 2 {
+            for index in 0..points.len() {
+                let point = points.get(index).expect("Point should be present");
 
-            data.push(point[0]);
-            data.push(point[1]);
-            data.push(point[2]);
+                data.push(point[coord]);
+            }
+        } else {
+            for _index in 0..points.len() {
+                data.push(T::one());
+            }
         }
+    }
 
-        let vec_storage = VecStorage::new(Dim::from_usize(moving_points.len()), Dim::from_usize(3), data);
-        let moving = DMatrix::from_data(vec_storage);
+    //println!("{:?}", data);
+
+    let vec_storage = VecStorage::new(Dim::from_usize(points.len()), Dim::from_usize(3), data);
+    DMatrix::from_data(vec_storage)
+}
+
+impl<T> AffineTransform<T>
+where
+    T: TransformScalar,
+{
+    pub fn from_points(moving_points: Vec<Vector2<T>>, fixed_points: Vec<Vector2<T>>) -> Self {
+        let moving = to_dmatrix(moving_points);
+        let fixed = to_dmatrix(fixed_points);
 
         println!("{:?}", moving);
+        println!("{:?}", fixed);
+        //println!("{:?}", moving.dot(&fixed));
+
+        let qr = QR::new(fixed) ; //.lu();
+        //println!("{:?}", qr);
+        let res = qr.solve(&moving).unwrap();
+        
+        // Probably a better way to do this
+        // Copy data from the solution to linear equations into Matrix4
+        let mut matrix = Matrix3::zeros();
+        matrix.m11 = *res.get((0, 0)).unwrap();
+        matrix.m21 = *res.get((0, 1)).unwrap();
+        matrix.m23 = *res.get((0, 2)).unwrap();
+        matrix.m12 = *res.get((1, 0)).unwrap();
+        matrix.m22 = *res.get((1, 1)).unwrap();
+        matrix.m32 = *res.get((1, 2)).unwrap();
+        matrix.m13 = *res.get((2, 0)).unwrap();
+        matrix.m23 = *res.get((2, 1)).unwrap();
+        //matrix.m33 = *res.get((2, 2)).unwrap();
+        //matrix.m44 = T::one();
+        matrix.m33 = T::one();
+
+
+        println!("{:?}", matrix);
 
         AffineTransform {
             //matrix: moving,
-            matrix: None
+            matrix: Some(matrix),
+        }
+    }
+
+    pub fn transform_point(&self, x: T, y: T) -> Option<Vector3<T>> {
+        match self.matrix {
+            Some(matrix) => {
+                let point = Vector3::new(x, y, T::one());
+                let point = matrix * point;
+
+                Some(point)
+            },
+            None => None
         }
     }
 }

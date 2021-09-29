@@ -8,3 +8,4 @@ edition = "2018"
 [dependencies]
 quick-xml = "0.22.0"
 nalgebra = "0.29.0"
+num-traits = "0.2"

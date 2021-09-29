@@ -1,6 +1,6 @@
-use super::{Acquisition, AcquisitionChannel, Slide, DataFormat, ImageFormat, Panorama};
+use super::{MCD, Acquisition, AcquisitionChannel, Slide, DataFormat, ImageFormat, Panorama};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::io::{Seek, Read};
 
 #[derive(Debug)]
 pub(crate) enum ROIType {
@@ -155,9 +155,11 @@ impl AcquisitionXML {
 }
 
 
-impl From<AcquisitionXML> for Acquisition {
+impl<T: Seek + Read> From<AcquisitionXML> for Acquisition<T> {
     fn from(acquisition: AcquisitionXML) -> Self {
         Acquisition {
+            reader: None,
+
             id: acquisition.id.unwrap(),
             description: acquisition.description.unwrap(),
             ablation_power: acquisition.ablation_power.unwrap(),
@@ -228,9 +230,11 @@ impl SlideXML {
     }
 }
 
-impl From<SlideXML> for Slide {
+impl<T: Seek + Read> From<SlideXML> for Slide<T> {
     fn from(slide: SlideXML) -> Self {
         Slide {
+            reader: None,
+
             id: slide.id.unwrap(),
             uid: slide.uid.unwrap(),
             description: slide.description.unwrap(),
@@ -296,9 +300,11 @@ impl PanoramaXML {
 }
 
 
-impl From<PanoramaXML> for Panorama {
+impl<T: Seek + Read> From<PanoramaXML> for Panorama<T> {
     fn from(panorama: PanoramaXML) -> Self {
         Panorama {
+            reader: None,
+
             id: panorama.id.unwrap(),
             slide_id: panorama.slide_id.unwrap(),
             description: panorama.description.unwrap(),

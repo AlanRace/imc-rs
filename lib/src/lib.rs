@@ -3,12 +3,16 @@ mod transform;
 
 use std::fmt;
 
+use std::sync::{Arc, Mutex};
+
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::io::SeekFrom;
-use std::sync::Arc;
 
 use parser::{MCDParser, ParserState};
+
+use nalgebra::Vector2;
+use transform::AffineTransform;
 
 use std::convert::TryInto;
 
@@ -33,8 +37,8 @@ fn u16_from_u8(a: &mut [u16], v: &[u8]) {
     }
 }
 
-fn get_image_data(
-    mut source: impl Read + Seek,
+fn get_image_data<T: Read + Seek>(
+    mut source: std::sync::MutexGuard<T>,
     start_offset: i64,
     end_offset: i64,
 ) -> std::io::Result<Vec<u8>> {
@@ -60,24 +64,24 @@ pub trait Print {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result;
 }
 
+#[derive(Debug)]
 pub struct MCD<T: Seek + Read> {
-    pub(crate) reader: T,
+    reader: Arc<Mutex<T>>,
     location: String,
 
     xmlns: Option<String>,
 
-    slides: HashMap<u16, Slide>,
+    slides: HashMap<u16, Slide<T>>,
     //acquisition_order: Vec<String>,
     //acquisitions: HashMap<String, Arc<Acquisition>>,
     //acquisition_rois: Vec<AcquisitionROI>,
     //roi_points: Vec<ROIPoint>,
 }
 
-
 impl<T: Seek + Read> MCD<T> {
     fn new(reader: T, location: &str) -> Self {
         MCD {
-            reader,
+            reader: Arc::new(Mutex::new(reader)),
             location: location.to_owned(),
             xmlns: None,
             slides: HashMap::new(),
@@ -86,8 +90,15 @@ impl<T: Seek + Read> MCD<T> {
             //acquisition_order: Vec::new(),
             //acquisitions: HashMap::new(),
             //acquisition_rois: Vec::new(),
-            
         }
+    }
+
+    /*pub fn get_reader(&self) -> &T {
+        &self.reader
+    }*/
+
+    pub fn get_reader(&self) -> &Arc<Mutex<T>> {
+        &self.reader
     }
 
     pub fn get_slide_ids(&self) -> Vec<u16> {
@@ -102,7 +113,7 @@ impl<T: Seek + Read> MCD<T> {
         ids
     }
 
-    pub fn get_slide(&self, id: &u16) -> Option<&Slide> {
+    pub fn get_slide(&self, id: &u16) -> Option<&Slide<T>> {
         self.slides.get(id)
     }
 
@@ -137,8 +148,6 @@ impl<T: Seek + Read> MCD<T> {
         let mcd = MCD::new(reader, location);
         let mut parser = MCDParser::new(mcd);
 
-        
-
         let chunk_size: i64 = 1000;
         let mut cur_offset: i64 = 0;
 
@@ -147,10 +156,14 @@ impl<T: Seek + Read> MCD<T> {
         let mut buf_u8 = vec![0; chunk_size.try_into().unwrap()];
 
         loop {
-            parser.current_mcd.as_mut().unwrap().reader.seek(SeekFrom::End(-cur_offset - chunk_size)).unwrap();
+            let mut reader = parser.current_mcd.as_mut().unwrap().reader.lock().unwrap();
+
+            reader
+                .seek(SeekFrom::End(-cur_offset - chunk_size))
+                .unwrap();
 
             //let mut buf = String::new();
-            parser.current_mcd.as_mut().unwrap().reader.read_exact(&mut buf_u8).unwrap();
+            reader.read_exact(&mut buf_u8).unwrap();
             // .read_to_string(&mut buf).unwrap();
 
             match std::str::from_utf8(&buf_u8) {
@@ -162,8 +175,8 @@ impl<T: Seek + Read> MCD<T> {
                     let total_size = cur_offset + chunk_size - (start_index as i64);
                     buf_u8 = vec![0; total_size.try_into().unwrap()];
 
-                    parser.current_mcd.as_mut().unwrap().reader.seek(SeekFrom::End(-total_size)).unwrap();
-                    parser.current_mcd.as_mut().unwrap().reader.read_exact(&mut buf_u8).unwrap();
+                    reader.seek(SeekFrom::End(-total_size)).unwrap();
+                    reader.read_exact(&mut buf_u8).unwrap();
 
                     //println!("Start Index: {}", start_index);
 
@@ -239,12 +252,12 @@ impl<T: Seek + Read> MCD<T> {
         parser.get_mcd()
     }
     /*pub(crate) fn add_acquisition_channel(&mut self, channel: AcquisitionChannel) {
-        let acquisition_id = channel.acquisition_id.expect("Must have an AcquisitionID or won't know which Acquisition the AcquisitionChannel belongs to");
-println!("{:?}", self.acquisitions);
-        
+            let acquisition_id = channel.acquisition_id.expect("Must have an AcquisitionID or won't know which Acquisition the AcquisitionChannel belongs to");
+    println!("{:?}", self.acquisitions);
 
-        panic!("No acquistion with ID: {:?}", acquisition_id);
-    }*/
+
+            panic!("No acquistion with ID: {:?}", acquisition_id);
+        }*/
 }
 
 impl<T: Seek + Read> Print for MCD<T> {
@@ -261,10 +274,16 @@ impl<T: Seek + Read> Print for MCD<T> {
         }
 
         let channels = self.get_channels();
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Channels", 25)?;
         for channel in channels {
-            writeln!(writer, "{0: <2} | {1: <10} | {2: <10}", channel.get_order_number(), channel.get_name(), channel.get_label())?;
+            writeln!(
+                writer,
+                "{0: <2} | {1: <10} | {2: <10}",
+                channel.get_order_number(),
+                channel.get_name(),
+                channel.get_label()
+            )?;
         }
 
         Ok(())
@@ -280,7 +299,9 @@ impl<T: Seek + Read> fmt::Display for MCD<T> {
 pub struct MCDPublic {}
 
 #[derive(Debug)]
-pub struct Slide {
+pub struct Slide<T: Seek + Read> {
+    reader: Option<Arc<Mutex<T>>>,
+
     id: u16,
     uid: String,
     description: String,
@@ -295,13 +316,28 @@ pub struct Slide {
 
     sw_version: String,
 
-    panoramas: HashMap<u16, Panorama>,
+    panoramas: HashMap<u16, Panorama<T>>,
 }
 
-impl Slide {
+impl<T: Seek + Read> Slide<T> {
     pub fn get_id(&self) -> u16 {
         self.id
     }
+
+    pub fn get_image(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mutex = self
+            .reader
+            .as_ref()
+            .expect("Should have copied the reader across");
+        let reader = mutex.lock().unwrap();
+
+        get_image_data(
+            reader,
+            self.image_start_offset,
+            self.image_end_offset,
+        )
+    }
+
 
     pub fn get_panorama_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.panoramas.len());
@@ -315,50 +351,115 @@ impl Slide {
         ids
     }
 
-    pub fn get_panorama(&self, id: &u16) -> Option<&Panorama> {
+    pub fn get_panorama(&self, id: &u16) -> Option<&Panorama<T>> {
         self.panoramas.get(id)
     }
 
     // Get panoramas ordered by ID
-    pub fn get_panoramas(&self) -> Vec<&Panorama> {
+    pub fn get_panoramas(&self) -> Vec<&Panorama<T>> {
         let mut panoramas = Vec::new();
 
         let ids = self.get_panorama_ids();
         for id in ids {
-            panoramas.push(self.get_panorama(&id).expect("Should only be getting panoramas that exist"));
+            panoramas.push(
+                self.get_panorama(&id)
+                    .expect("Should only be getting panoramas that exist"),
+            );
         }
 
         panoramas
     }
 }
 
-
-
-impl Print for Slide {
+impl<T: Seek + Read> Print for Slide<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Slide", 36)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "ID", self.id, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "UID", self.uid, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "Description", self.description, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "Filename", self.filename, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "Type", self.slide_type, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {} μm x {} μm ", "", "Dimensions", self.width_um, self.height_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "Image File", self.image_file, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <16} | {}", "", "Software Version", self.sw_version, indent=indent)?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "ID",
+            self.id,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "UID",
+            self.uid,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "Description",
+            self.description,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "Filename",
+            self.filename,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "Type",
+            self.slide_type,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {} μm x {} μm ",
+            "",
+            "Dimensions",
+            self.width_um,
+            self.height_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "Image File",
+            self.image_file,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <16} | {}",
+            "",
+            "Software Version",
+            self.sw_version,
+            indent = indent
+        )?;
 
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "", 36)?;
 
-        writeln!(writer, "{:indent$}{} panorama(s) with ids: {:?}", "", self.panoramas.len(), self.get_panorama_ids(), indent=indent+1)?;
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(
+            writer,
+            "{:indent$}{} panorama(s) with ids: {:?}",
+            "",
+            self.panoramas.len(),
+            self.get_panorama_ids(),
+            indent = indent + 1
+        )?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "", 36)?;
 
         Ok(())
     }
 }
 
-impl fmt::Display for Slide {
+impl<T: Seek + Read> fmt::Display for Slide<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
@@ -370,7 +471,9 @@ pub enum ImageFormat {
 }
 
 #[derive(Debug)]
-pub struct Panorama {
+pub struct Panorama<T: Seek + Read> {
+    reader: Option<Arc<Mutex<T>>>,
+
     id: u16,
     slide_id: u16,
     description: String,
@@ -390,20 +493,22 @@ pub struct Panorama {
     image_format: ImageFormat,
     pixel_scale_coef: f64,
 
-    acquisitions: HashMap<u16, Acquisition>,
+    acquisitions: HashMap<u16, Acquisition<T>>,
 }
 
-impl Panorama {
+impl<T: Seek + Read> Panorama<T> {
     pub fn get_id(&self) -> u16 {
         self.id
     }
 
-    pub fn get_image(&self, source: impl Read + Seek) -> Result<Vec<u8>, std::io::Error> {
-        get_image_data(
-            source,
-            self.image_start_offset,
-            self.image_end_offset,
-        )
+    pub fn get_image(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mutex = self
+            .reader
+            .as_ref()
+            .expect("Should have copied the reader across");
+        let reader = mutex.lock().unwrap();
+
+        get_image_data(reader, self.image_start_offset, self.image_end_offset)
     }
 
     pub fn get_acquisition_ids(&self) -> Vec<u16> {
@@ -418,52 +523,142 @@ impl Panorama {
         ids
     }
 
-    pub fn get_acquisition(&self, id: &u16) -> Option<&Acquisition> {
+    pub fn get_acquisition(&self, id: &u16) -> Option<&Acquisition<T>> {
         self.acquisitions.get(id)
     }
 
-
     // Get acquisitions ordered by ID
-    pub fn get_acquisitions(&self) -> Vec<&Acquisition> {
+    pub fn get_acquisitions(&self) -> Vec<&Acquisition<T>> {
         let mut acquisitions = Vec::new();
 
         let ids = self.get_acquisition_ids();
         for id in ids {
-            acquisitions.push(self.get_acquisition(&id).expect("Should only be getting acquisitions that exist"));
+            acquisitions.push(
+                self.get_acquisition(&id)
+                    .expect("Should only be getting acquisitions that exist"),
+            );
         }
 
         acquisitions
     }
+
+    pub fn to_slide_transform(&self) -> AffineTransform<f64> {
+        let mut moving_points = Vec::new();
+        let mut fixed_points = Vec::new();
+
+        moving_points.push(Vector2::new(self.slide_x1_pos_um, self.slide_y1_pos_um));
+        moving_points.push(Vector2::new(self.slide_x2_pos_um, self.slide_y2_pos_um));
+        moving_points.push(Vector2::new(self.slide_x3_pos_um, self.slide_y3_pos_um));
+        //moving_points.push(Vector2::new(slide_x4_pos_um, self.slide_y4_pos_um));
+
+        fixed_points.push(Vector2::new(0.0, 0.0));
+        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
+        fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
+        //fixed_points.push(Vector2::new(self.pixel_width as f64, self.pixel_height as f64));
+
+        AffineTransform::from_points(moving_points, fixed_points)
+    }
 }
 
-
-
-impl Print for Panorama {
+impl<T: Seek + Read> Print for Panorama<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Panorama", 42)?;
-        writeln!(writer, "{:indent$}{: <20} | {}", "", "ID", self.id, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | {}", "", "Slide ID", self.slide_id, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | {}", "", "Description", self.description, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "Slide coordinates", self.slide_x1_pos_um, self.slide_y1_pos_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "", self.slide_x2_pos_um, self.slide_y2_pos_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "", self.slide_x3_pos_um, self.slide_y3_pos_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)", "", "", self.slide_x4_pos_um, self.slide_y4_pos_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | {} x {}", "", "Dimensions (pixels)", self.pixel_width, self.pixel_height, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <20} | {}", "", "Pixel scale coef", self.pixel_scale_coef, indent=indent)?;
-        
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | {}",
+            "",
+            "ID",
+            self.id,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | {}",
+            "",
+            "Slide ID",
+            self.slide_id,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | {}",
+            "",
+            "Description",
+            self.description,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)",
+            "",
+            "Slide coordinates",
+            self.slide_x1_pos_um,
+            self.slide_y1_pos_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)",
+            "",
+            "",
+            self.slide_x2_pos_um,
+            self.slide_y2_pos_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)",
+            "",
+            "",
+            self.slide_x3_pos_um,
+            self.slide_y3_pos_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | ({:.4} μm, {:.4} μm)",
+            "",
+            "",
+            self.slide_x4_pos_um,
+            self.slide_y4_pos_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | {} x {}",
+            "",
+            "Dimensions (pixels)",
+            self.pixel_width,
+            self.pixel_height,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <20} | {}",
+            "",
+            "Pixel scale coef",
+            self.pixel_scale_coef,
+            indent = indent
+        )?;
+
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "", 42)?;
 
-        writeln!(writer, "{} acquisition(s) with ids: {:?}", self.acquisitions.len(), self.get_acquisition_ids())?;
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        writeln!(
+            writer,
+            "{} acquisition(s) with ids: {:?}",
+            self.acquisitions.len(),
+            self.get_acquisition_ids()
+        )?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "", 42)?;
 
         Ok(())
     }
 }
 
-impl fmt::Display for Panorama {
+impl<T: Seek + Read + 'static> fmt::Display for Panorama<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
@@ -493,14 +688,15 @@ impl AcquisitionChannel {
     }
 }
 
-
 #[derive(Debug)]
 enum DataFormat {
     Float,
 }
 
 #[derive(Debug)]
-pub struct Acquisition {
+pub struct Acquisition<T: Read + Seek> {
+    reader: Option<Arc<Mutex<T>>>,
+
     id: u16,
     description: String,
     ablation_power: f64,
@@ -535,25 +731,85 @@ pub struct Acquisition {
     channels: Vec<AcquisitionChannel>,
 }
 
-impl Acquisition {
+#[derive(Debug)]
+pub struct BoundingBox {
+    min_x: f64,
+    min_y: f64,
+    width: f64,
+    height: f64,
+}
 
-    pub fn get_before_ablation_image(
-        &self,
-        source: impl Read + Seek,
-    ) -> Result<Vec<u8>, std::io::Error> {
+impl<T: Read + Seek> Acquisition<T> {
+    pub fn to_slide_transform(&self) -> AffineTransform<f64> {
+        let mut moving_points = Vec::new();
+        let mut fixed_points = Vec::new();
+
+        // There seems to be a bug where the start and end x pos is recorded as the same value
+        let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
+            true => {
+                self.roi_start_x_pos_um
+                    + (self.max_x as f64 * self.ablation_distance_between_shots_x)
+            }
+            false => self.roi_end_x_pos_um,
+        };
+
+        moving_points.push(Vector2::new(
+            self.roi_start_x_pos_um,
+            self.roi_start_y_pos_um,
+        ));
+        moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_start_y_pos_um));
+        moving_points.push(Vector2::new(self.roi_start_x_pos_um, self.roi_end_y_pos_um));
+        //moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_end_y_pos_um));
+
+        fixed_points.push(Vector2::new(0.0, 0.0));
+        fixed_points.push(Vector2::new(self.max_x as f64, 0.0));
+        fixed_points.push(Vector2::new(0.0, self.max_y as f64));
+        //fixed_points.push(Vector2::new(self.max_x as f64, self.max_y as f64));
+
+        AffineTransform::from_points(moving_points, fixed_points)
+    }
+
+    pub fn slide_bounding_box(&self) -> BoundingBox {
+        // There seems to be a bug where the start and end x pos is recorded as the same value
+        let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
+            true => {
+                self.roi_start_x_pos_um
+                    + (self.max_x as f64 * self.ablation_distance_between_shots_x)
+            }
+            false => self.roi_end_x_pos_um,
+        };
+
+        BoundingBox {
+            min_x: f64::min(self.roi_start_x_pos_um, roi_end_x_pos_um),
+            min_y: f64::min(self.roi_start_y_pos_um, self.roi_end_y_pos_um),
+            width: (roi_end_x_pos_um - self.roi_start_x_pos_um).abs(),
+            height: (self.roi_end_y_pos_um - self.roi_start_y_pos_um).abs(),
+        }
+    }
+
+    pub fn get_before_ablation_image(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mutex = self
+            .reader
+            .as_ref()
+            .expect("Should have copied the reader across");
+        let reader = mutex.lock().unwrap();
+
         get_image_data(
-            source,
+            reader,
             self.before_ablation_image_start_offset,
             self.before_ablation_image_end_offset,
         )
     }
 
-    pub fn get_after_ablation_image(
-        &self,
-        source: impl Read + Seek,
-    ) -> Result<Vec<u8>, std::io::Error> {
+    pub fn get_after_ablation_image(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mutex = self
+            .reader
+            .as_ref()
+            .expect("Should have copied the reader across");
+        let reader = mutex.lock().unwrap();
+
         get_image_data(
-            source,
+            reader,
             self.after_ablation_image_start_offset,
             self.after_ablation_image_end_offset,
         )
@@ -564,40 +820,168 @@ impl Acquisition {
     }
 }
 
-
-impl Print for Acquisition {
+impl<T: Seek + Read> Print for Acquisition<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        write!(writer, "{:indent$}", "", indent=indent)?;
+        write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Acquisition", 48)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "ID", self.id, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Description", self.description, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Order number", self.order_number, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {} x {}", "", "Dimensions (pixels)", self.max_x, self.max_y, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {} x {}", "", "Distance between shots", self.ablation_distance_between_shots_x, self.ablation_distance_between_shots_y, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Signal type", self.signal_type, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Ablation power", self.ablation_power, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Dual count start", self.dual_count_start, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Start timestamp", self.start_timestamp, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "End timestamp", self.end_timestamp, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | ({:.4} μm, {:.4} μm)", "", "ROI", self.roi_start_x_pos_um, self.roi_start_y_pos_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | ({:.4} μm, {:.4} μm)", "", "", self.roi_end_x_pos_um, self.roi_end_y_pos_um, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Movement type", self.movement_type, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {:?}", "", "Segment data format", self.segment_data_format, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Value bytes", self.value_bytes, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Plume start", self.plume_start, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Plume end", self.plume_end, indent=indent)?;
-        writeln!(writer, "{:indent$}{: <22} | {}", "", "Template", self.template, indent=indent)?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "ID",
+            self.id,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Description",
+            self.description,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Order number",
+            self.order_number,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {} x {}",
+            "",
+            "Dimensions (pixels)",
+            self.max_x,
+            self.max_y,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {} x {}",
+            "",
+            "Distance between shots",
+            self.ablation_distance_between_shots_x,
+            self.ablation_distance_between_shots_y,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Signal type",
+            self.signal_type,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Ablation power",
+            self.ablation_power,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Dual count start",
+            self.dual_count_start,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Start timestamp",
+            self.start_timestamp,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "End timestamp",
+            self.end_timestamp,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | ({:.4} μm, {:.4} μm)",
+            "",
+            "ROI",
+            self.roi_start_x_pos_um,
+            self.roi_start_y_pos_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | ({:.4} μm, {:.4} μm)",
+            "",
+            "",
+            self.roi_end_x_pos_um,
+            self.roi_end_y_pos_um,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Movement type",
+            self.movement_type,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {:?}",
+            "",
+            "Segment data format",
+            self.segment_data_format,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Value bytes",
+            self.value_bytes,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Plume start",
+            self.plume_start,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Plume end",
+            self.plume_end,
+            indent = indent
+        )?;
+        writeln!(
+            writer,
+            "{:indent$}{: <22} | {}",
+            "",
+            "Template",
+            self.template,
+            indent = indent
+        )?;
 
         Ok(())
     }
 }
 
-impl fmt::Display for Acquisition {
+impl<T: Seek + Read> fmt::Display for Acquisition<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -606,14 +990,13 @@ mod tests {
     use std::fs::File;
     use std::time::Instant;
 
-    use nalgebra::Vector3;
     use crate::transform::AffineTransform;
+    use nalgebra::Vector3;
 
     #[test]
     fn it_works() {
         let start = Instant::now();
         let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
-
 
         let duration = start.elapsed();
 
@@ -629,7 +1012,6 @@ mod tests {
         //for (id, acquisition) in &mcd.acquisitions {
         //    println!("{:?}: {:?}", id, acquisition);
         //}
-        
         //println!("{:?}", mcd.acquisitions[0]);
         //println!("{:?}", mcd.roi_points[0]);
         //std::fs::write("tmp.xml", combined_xml).expect("Unable to write file");
@@ -639,17 +1021,40 @@ mod tests {
 
         println!("Time elapsed when parsing is: {:?}", duration);
 
+        let acquisition = mcd
+            .get_slide(&1)
+            .unwrap()
+            .get_panorama(&3)
+            .unwrap()
+            .get_acquisition(&1)
+            .unwrap();
+        println!("{}", acquisition);
+        let point = acquisition.to_slide_transform().transform_point(1.0, 1.0);
+        println!("Transformed point = {:?}", point);
+
+        std::fs::write("tmp.png", acquisition.get_after_ablation_image().unwrap())
+            .expect("Unable to write file");
+        std::fs::write("slide.jpeg", mcd
+        .get_slide(&1).unwrap().get_image().unwrap())
+            .expect("Unable to write file");
+
+        println!("Bounding box = {:?}", acquisition.slide_bounding_box());
+
         let mut points = Vec::new();
-        points.push(Vector3::new(20, 10, 0));
-        points.push(Vector3::new(20, 10, 0));
-        points.push(Vector3::new(20, 10, 0));
+        points.push(Vector2::new(20.0, 10.0));
+        points.push(Vector2::new(20.0, 20.0));
+        points.push(Vector2::new(40.0, 10.0));
+        //points.push(Vector2::new(40.0, 20.0));
+        //points.push(Vector3::new(20.0, 10.0, 0.0));
 
         let mut points2 = Vec::new();
-        points2.push(Vector3::new(20, 10, 0));
-        points2.push(Vector3::new(20, 10, 0));
-        points2.push(Vector3::new(20, 10, 0));
+        points2.push(Vector2::new(40.0, 5.0));
+        points2.push(Vector2::new(40.0, 10.0));
+        points2.push(Vector2::new(80.0, 5.0));
+        //points2.push(Vector2::new(80.0, 10.0));
+        //points2.push(Vector3::new(20.0, 10.0, 0.0));
 
-        let tranform = AffineTransform::from_points(points, points2);
+        let transform = AffineTransform::from_points(points, points2);
 
         //println!("{}", combined_xml);
     }

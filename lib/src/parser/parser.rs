@@ -96,8 +96,8 @@ pub struct MCDParser<T: Seek + Read> {
     //pub(super) history: Vec<String>,
     errors: std::collections::VecDeque<String>,
 
-    panoramas: HashMap<u16, Panorama>,
-    acquisitions: HashMap<u16, Acquisition>,
+    panoramas: HashMap<u16, Panorama<T>>,
+    acquisitions: HashMap<u16, Acquisition<T>>,
     acquisition_channels: Vec<AcquisitionChannel>,
     acquisition_rois: Vec<AcquisitionROI>,
 
@@ -142,6 +142,8 @@ impl<T: Seek + Read> MCDParser<T> {
             .take()
             .expect("Can't call get_mcd() when the parse hasn't been run");
 
+        let reader = mcd.get_reader().clone();
+
         // Add the channels to the corresponding acquisition
         for channel in self.acquisition_channels.drain(0..) {
             let acquisition = self
@@ -153,7 +155,8 @@ impl<T: Seek + Read> MCDParser<T> {
 
         // Create map with Arc for sharing pointers with Panorama
         let mut acquisitions = HashMap::new();
-        for (id, acquisition) in self.acquisitions.drain() {
+        for (id, mut acquisition) in self.acquisitions.drain() {
+            acquisition.reader = Some(reader.clone());
             acquisitions.insert(id, acquisition);
         }
 
@@ -175,16 +178,20 @@ impl<T: Seek + Read> MCDParser<T> {
                 panorama.acquisitions.insert(acquisition.id, acquisition);
         }
 
-        for (id, panorama) in self.panoramas.drain() {
+        for (id, mut panorama) in self.panoramas.drain() {
             //mcd.panoramas.insert(id, panorama);
             let slide_id = panorama.slide_id;
 
             let slide = mcd.slides.get_mut(&slide_id).expect(&format!("Missing Slide with ID {}", slide_id));
+            panorama.reader = Some(reader.clone());
             slide.panoramas.insert(id, panorama);
         }
 
         // Update the acquisitions
         //mcd.acquisitions = acquisitions;
+        for (_, slide) in &mut mcd.slides {
+            slide.reader = Some(reader.clone());
+        }
 
         mcd
     }
