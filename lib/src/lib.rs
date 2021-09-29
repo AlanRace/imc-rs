@@ -1007,6 +1007,8 @@ mod tests {
     use crate::transform::AffineTransform;
     use nalgebra::Vector3;
 
+    use std::io::{BufReader};
+
     use std::io::Cursor;
     use image::io::Reader as ImageReader;
     use image::imageops::FilterType;
@@ -1024,7 +1026,7 @@ mod tests {
         //    println!("{}", parser.pop_error_front().unwrap());
         //}
 
-        let file = File::open(filename).unwrap();
+        let file = BufReader::new(File::open(filename).unwrap());
         let mcd = MCD::parse(file, filename);
 
         //println!("{:?}", mcd.slide);
@@ -1041,7 +1043,7 @@ mod tests {
 
         println!("Time elapsed when parsing is: {:?}", duration);
 
-        let acquisition = mcd
+        /*let acquisition = mcd
             .get_slide(&1)
             .unwrap()
             .get_panorama(&3)
@@ -1052,22 +1054,29 @@ mod tests {
         let point = acquisition.to_slide_transform().transform_point(1.0, 1.0);
         println!("Transformed point = {:?}", point);
 
+
+        println!("Bounding box = {:?}", acquisition.slide_bounding_box());
+
         std::fs::write("tmp.png", acquisition.get_after_ablation_image().unwrap())
-            .expect("Unable to write file");
+            .expect("Unable to write file");*/
 
         let slide = mcd.get_slide(&1).unwrap();
 
         //std::fs::write("slide.jpeg", slide.get_image().unwrap())
         //    .expect("Unable to write file");
 
-        println!("Bounding box = {:?}", acquisition.slide_bounding_box());
-
         let mut reader = ImageReader::new(Cursor::new(mcd.get_slide(&1).unwrap().get_image().unwrap()));
+        println!("Read in !");
         reader.set_format(ImageFormat::Jpeg);
         let slide_image = reader.decode().unwrap();
         //let slide_image = ImageReader::open("slide.jpeg").unwrap().decode().unwrap();
 
-        println!("Read in !");
+
+        println!("Decoded !");
+
+        slide_image.save("slide.jpeg").unwrap();
+
+        println!("Saved !");
 
         let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Lanczos3).to_rgb8();
 
