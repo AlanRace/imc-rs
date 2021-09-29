@@ -511,6 +511,20 @@ impl<T: Seek + Read> Panorama<T> {
         get_image_data(reader, self.image_start_offset, self.image_end_offset)
     }
 
+    pub fn slide_bounding_box(&self) -> BoundingBox {
+        let min_x = f64::min(self.slide_x1_pos_um, f64::min(self.slide_x2_pos_um, f64::min(self.slide_x3_pos_um, self.slide_x4_pos_um)));
+        let min_y = f64::min(self.slide_y1_pos_um, f64::min(self.slide_y2_pos_um, f64::min(self.slide_y3_pos_um, self.slide_y4_pos_um)));
+        let max_x = f64::max(self.slide_x1_pos_um, f64::max(self.slide_x2_pos_um, f64::max(self.slide_x3_pos_um, self.slide_x4_pos_um)));
+        let max_y = f64::max(self.slide_y1_pos_um, f64::max(self.slide_y2_pos_um, f64::max(self.slide_y3_pos_um, self.slide_y4_pos_um)));
+
+        BoundingBox {
+            min_x,
+            min_y,
+            width: (max_x - min_x).abs(),
+            height: (max_y - min_y).abs(),
+        }
+    }
+
     pub fn get_acquisition_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.acquisitions.len());
 
@@ -993,6 +1007,12 @@ mod tests {
     use crate::transform::AffineTransform;
     use nalgebra::Vector3;
 
+    use std::io::Cursor;
+    use image::io::Reader as ImageReader;
+    use image::imageops::FilterType;
+    use image::ImageFormat;
+    use image::GenericImageView; 
+
     #[test]
     fn it_works() {
         let start = Instant::now();
@@ -1034,11 +1054,55 @@ mod tests {
 
         std::fs::write("tmp.png", acquisition.get_after_ablation_image().unwrap())
             .expect("Unable to write file");
-        std::fs::write("slide.jpeg", mcd
-        .get_slide(&1).unwrap().get_image().unwrap())
-            .expect("Unable to write file");
+
+        let slide = mcd.get_slide(&1).unwrap();
+
+        //std::fs::write("slide.jpeg", slide.get_image().unwrap())
+        //    .expect("Unable to write file");
 
         println!("Bounding box = {:?}", acquisition.slide_bounding_box());
+
+        let mut reader = ImageReader::new(Cursor::new(mcd.get_slide(&1).unwrap().get_image().unwrap()));
+        reader.set_format(ImageFormat::Jpeg);
+        let slide_image = reader.decode().unwrap();
+        //let slide_image = ImageReader::open("slide.jpeg").unwrap().decode().unwrap();
+
+        println!("Read in !");
+
+        let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Lanczos3).to_rgb8();
+
+        for panorama in slide.get_panoramas() {
+            let mut reader = ImageReader::new(Cursor::new(panorama.get_image().unwrap()));
+            reader.set_format(ImageFormat::Png);
+            let panorama_image = reader.decode().unwrap();
+            
+            let bounding_box = panorama.slide_bounding_box();
+
+            println!("[Panorama] Bounding box = {:?}", bounding_box);
+
+            let offset_x = (bounding_box.min_x / 10.0).round() as u32;
+            let offset_y = ((25000.0 - bounding_box.min_y) / 10.0).round() as u32;
+            let width = (bounding_box.width / 10.0).round() as u32;
+            let height = (bounding_box.height / 10.0).round() as u32;
+
+            let panorama_image = panorama_image.resize_exact(width, height, FilterType::Lanczos3).to_rgb8();
+
+            if offset_x + width > 7500 || offset_y + height > 2500 {
+                continue;
+            }
+
+            for y in 0..height {
+                for x in 0..width {
+                    resized_image.put_pixel(offset_x + x, offset_y + y, *panorama_image.get_pixel(x, y));
+                }
+            }
+            
+            //panorama_image.resize_exact()
+
+            //let transform = panorama.to_slide_transform();
+        }
+
+        resized_image.save("slide_resize.jpeg").unwrap();
 
         let mut points = Vec::new();
         points.push(Vector2::new(20.0, 10.0));
