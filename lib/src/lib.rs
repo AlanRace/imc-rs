@@ -1078,7 +1078,8 @@ mod tests {
 
         println!("Saved !");
 
-        let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Lanczos3).to_rgb8();
+        let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Nearest).to_rgb8();
+        println!("Resized !");
 
         for panorama in slide.get_panoramas() {
             let mut reader = ImageReader::new(Cursor::new(panorama.get_image().unwrap()));
@@ -1088,13 +1089,14 @@ mod tests {
             let bounding_box = panorama.slide_bounding_box();
 
             println!("[Panorama] Bounding box = {:?}", bounding_box);
+            println!("[Panorama] Transform = {:?}", panorama.to_slide_transform());
 
             let offset_x = (bounding_box.min_x / 10.0).round() as u32;
-            let offset_y = ((25000.0 - bounding_box.min_y) / 10.0).round() as u32;
+            let offset_y = ((25000.0 - bounding_box.min_y - bounding_box.height) / 10.0).round() as u32;
             let width = (bounding_box.width / 10.0).round() as u32;
             let height = (bounding_box.height / 10.0).round() as u32;
 
-            let panorama_image = panorama_image.resize_exact(width, height, FilterType::Lanczos3).to_rgb8();
+            let panorama_image = panorama_image.resize_exact(width, height, FilterType::Nearest).to_rgb8();
 
             if offset_x + width > 7500 || offset_y + height > 2500 {
                 continue;
