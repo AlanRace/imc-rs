@@ -4,8 +4,8 @@ use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector3, Vector2, QR};
 use std::fmt;
 
 enum Direction {
-    ToMoving,
-    ToFixed,
+    ToSlide,
+    FromSlide,
 }
 
 // Create a trait which captures necessary traits for matrix multiplication

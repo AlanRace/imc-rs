@@ -16,6 +16,12 @@ use transform::AffineTransform;
 
 use std::convert::TryInto;
 
+use std::io::Cursor;
+use image::io::Reader as ImageReader;
+use image::imageops::FilterType;
+use image::{ImageFormat, RgbImage, RgbaImage, DynamicImage};
+use image::GenericImageView; 
+
 const BUF_SIZE: usize = 4096;
 
 fn find_mcd_start(chunk: &std::vec::Vec<u8>, chunk_size: usize) -> usize {
@@ -324,7 +330,7 @@ impl<T: Seek + Read> Slide<T> {
         self.id
     }
 
-    pub fn get_image(&self) -> Result<Vec<u8>, std::io::Error> {
+    pub fn get_image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
@@ -338,6 +344,77 @@ impl<T: Seek + Read> Slide<T> {
         )
     }
 
+    fn get_dynamic_image(&self) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.get_image_data().unwrap()));
+        reader.set_format(ImageFormat::Jpeg);
+        reader.decode().unwrap()
+    }
+
+    pub fn get_image(&self) -> RgbImage {
+        match self.get_dynamic_image() {
+            DynamicImage::ImageRgb8(rgb8) => rgb8,
+            _ => panic!("Unexpected DynamicImage type")
+        }
+    }
+
+    pub fn create_overview_image(&self, width: u32) -> RgbaImage {
+        let slide_image = self.get_dynamic_image();
+
+        // Move into function to help debugging
+        match &slide_image {
+            DynamicImage::ImageLuma8(_grey_image) => println!("ImageLuma8"),
+            DynamicImage::ImageLumaA8(_grey_alpha_image) => println!("ImageLumaA8"),
+            DynamicImage::ImageRgb8(_rgb8) => println!("ImageRgb8"),
+            DynamicImage::ImageRgba8(_rgba8) => println!("ImageRgba8"),
+            DynamicImage::ImageBgr8(_bgr8) => println!("ImageBgr8"),
+            DynamicImage::ImageBgra8(_bgra8) => println!("ImageBgra8"),
+            DynamicImage::ImageLuma16(_luma16) => println!("ImageLuma16"),
+            DynamicImage::ImageLumaA16(_lumaa16) => println!("ImageLumaA16"),
+            DynamicImage::ImageRgb16(_rgb16) => println!("ImageRgb16"),
+            DynamicImage::ImageRgba16(_rgba16) => println!("ImageRgba16"),
+        }
+
+        println!("Decoded !");
+
+        slide_image.save("slide.jpeg").unwrap();
+
+        println!("Saved !");
+
+        let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Nearest).to_rgba8();
+        println!("Resized !");
+
+        for panorama in self.get_panoramas() {
+            let mut reader = ImageReader::new(Cursor::new(panorama.get_image().unwrap()));
+            reader.set_format(ImageFormat::Png);
+            let panorama_image = reader.decode().unwrap();
+
+            let panorama_image = match &panorama_image {
+                DynamicImage::ImageRgba8(rgba8) => rgba8,
+                _ => panic!("Unexpected DynamicImage type")
+            };
+
+            //let panorama_image = panorama_image.to_rgba8();
+            
+            let bounding_box = panorama.slide_bounding_box();
+
+            let transform = panorama.to_slide_transform();
+
+            println!("[Panorama] Bounding box = {:?}", bounding_box);
+            println!("[Panorama] Transform = {:?}", transform);
+
+            for y in 0..panorama_image.height() {
+                for x in 0..panorama_image.width() {
+                    let new_point = transform.transform_point(x as f64, y as f64).unwrap();
+
+                    let pixel = *panorama_image.get_pixel(x, y);
+                    
+                    resized_image.put_pixel((new_point[0] / 10.0).round() as u32 , ((self.height_um - new_point[1]) / 10.0).round() as u32, pixel);
+                }
+            }
+        }
+        
+        resized_image
+    }
 
     pub fn get_panorama_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.panoramas.len());
@@ -465,10 +542,10 @@ impl<T: Seek + Read> fmt::Display for Slide<T> {
     }
 }
 
-#[derive(Debug)]
+/*#[derive(Debug)]
 pub enum ImageFormat {
     Png,
-}
+}*/
 
 #[derive(Debug)]
 pub struct Panorama<T: Seek + Read> {
@@ -563,12 +640,12 @@ impl<T: Seek + Read> Panorama<T> {
         moving_points.push(Vector2::new(self.slide_x1_pos_um, self.slide_y1_pos_um));
         moving_points.push(Vector2::new(self.slide_x2_pos_um, self.slide_y2_pos_um));
         moving_points.push(Vector2::new(self.slide_x3_pos_um, self.slide_y3_pos_um));
-        //moving_points.push(Vector2::new(slide_x4_pos_um, self.slide_y4_pos_um));
+        //moving_points.push(Vector2::new(self.slide_x4_pos_um, self.slide_y4_pos_um));
 
         fixed_points.push(Vector2::new(0.0, 0.0));
         fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
-        fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
-        //fixed_points.push(Vector2::new(self.pixel_width as f64, self.pixel_height as f64));
+        fixed_points.push(Vector2::new(self.pixel_width as f64, self.pixel_height as f64));
+        //fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
 
         AffineTransform::from_points(moving_points, fixed_points)
     }
@@ -1009,16 +1086,12 @@ mod tests {
 
     use std::io::{BufReader};
 
-    use std::io::Cursor;
-    use image::io::Reader as ImageReader;
-    use image::imageops::FilterType;
-    use image::ImageFormat;
-    use image::GenericImageView; 
 
     #[test]
     fn it_works() {
         let start = Instant::now();
         let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
+        let filename = "/home/alan/Documents/Work/Nicole/Salmonella/2019-10-25_Salmonella_final_VS+WT.mcd";
 
         let duration = start.elapsed();
 
@@ -1065,37 +1138,15 @@ mod tests {
         //std::fs::write("slide.jpeg", slide.get_image().unwrap())
         //    .expect("Unable to write file");
 
-        let mut reader = ImageReader::new(Cursor::new(mcd.get_slide(&1).unwrap().get_image().unwrap()));
-        println!("Read in !");
-        reader.set_format(ImageFormat::Jpeg);
-        let slide_image = reader.decode().unwrap();
-        //let slide_image = ImageReader::open("slide.jpeg").unwrap().decode().unwrap();
-
-
-        println!("Decoded !");
-
-        slide_image.save("slide.jpeg").unwrap();
-
-        println!("Saved !");
-
-        let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Nearest).to_rgb8();
-        println!("Resized !");
-
-        for panorama in slide.get_panoramas() {
-            let mut reader = ImageReader::new(Cursor::new(panorama.get_image().unwrap()));
-            reader.set_format(ImageFormat::Png);
-            let panorama_image = reader.decode().unwrap();
+        
             
-            let bounding_box = panorama.slide_bounding_box();
-
-            println!("[Panorama] Bounding box = {:?}", bounding_box);
-            println!("[Panorama] Transform = {:?}", panorama.to_slide_transform());
+            /*
 
             let offset_x = (bounding_box.min_x / 10.0).round() as u32;
             let offset_y = ((25000.0 - bounding_box.min_y - bounding_box.height) / 10.0).round() as u32;
             let width = (bounding_box.width / 10.0).round() as u32;
             let height = (bounding_box.height / 10.0).round() as u32;
-
+            
             let panorama_image = panorama_image.resize_exact(width, height, FilterType::Nearest).to_rgb8();
 
             if offset_x + width > 7500 || offset_y + height > 2500 {
@@ -1106,15 +1157,15 @@ mod tests {
                 for x in 0..width {
                     resized_image.put_pixel(offset_x + x, offset_y + y, *panorama_image.get_pixel(x, y));
                 }
-            }
+            }*/
             
             //panorama_image.resize_exact()
 
             //let transform = panorama.to_slide_transform();
-        }
 
+        let resized_image = slide.create_overview_image(7500);
         resized_image.save("slide_resize.jpeg").unwrap();
-
+/*
         let mut points = Vec::new();
         points.push(Vector2::new(20.0, 10.0));
         points.push(Vector2::new(20.0, 20.0));
@@ -1129,7 +1180,7 @@ mod tests {
         //points2.push(Vector2::new(80.0, 10.0));
         //points2.push(Vector3::new(20.0, 10.0, 0.0));
 
-        let transform = AffineTransform::from_points(points, points2);
+        let transform = AffineTransform::from_points(points, points2);*/
 
         //println!("{}", combined_xml);
     }
