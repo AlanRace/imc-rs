@@ -123,6 +123,16 @@ impl<T: Seek + Read> MCD<T> {
         self.slides.get(id)
     }
 
+    pub fn get_slides(&self) -> Vec<&Slide<T>> {
+        let mut slides = Vec::new();
+
+        for id in self.get_slide_ids() {
+            slides.push(self.get_slide(&id).expect("Should only be finding slides that exist"));
+        }
+
+        slides
+    }
+
     pub fn get_channels(&self) -> Vec<&AcquisitionChannel> {
         let mut channels = HashMap::new();
 
@@ -384,14 +394,8 @@ impl<T: Seek + Read> Slide<T> {
         println!("Resized !");
 
         for panorama in self.get_panoramas() {
-            let mut reader = ImageReader::new(Cursor::new(panorama.get_image().unwrap()));
-            reader.set_format(ImageFormat::Png);
-            let panorama_image = reader.decode().unwrap();
 
-            let panorama_image = match &panorama_image {
-                DynamicImage::ImageRgba8(rgba8) => rgba8,
-                _ => panic!("Unexpected DynamicImage type")
-            };
+            let panorama_image = panorama.get_image();
 
             //let panorama_image = panorama_image.to_rgba8();
             
@@ -574,11 +578,15 @@ pub struct Panorama<T: Seek + Read> {
 }
 
 impl<T: Seek + Read> Panorama<T> {
-    pub fn get_id(&self) -> u16 {
+    pub fn id(&self) -> u16 {
         self.id
     }
 
-    pub fn get_image(&self) -> Result<Vec<u8>, std::io::Error> {
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn get_image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
@@ -586,6 +594,19 @@ impl<T: Seek + Read> Panorama<T> {
         let reader = mutex.lock().unwrap();
 
         get_image_data(reader, self.image_start_offset, self.image_end_offset)
+    }
+
+    fn get_dynamic_image(&self) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.get_image_data().unwrap()));
+        reader.set_format(ImageFormat::Png);
+        reader.decode().unwrap()
+    }
+
+    pub fn get_image(&self) -> RgbaImage {
+        match self.get_dynamic_image() {
+            DynamicImage::ImageRgba8(rgba8) => rgba8,
+            _ => panic!("Unexpected DynamicImage type")
+        }
     }
 
     pub fn slide_bounding_box(&self) -> BoundingBox {
@@ -831,6 +852,18 @@ pub struct BoundingBox {
 }
 
 impl<T: Read + Seek> Acquisition<T> {
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn width(&self) -> i32 {
+        self.max_x
+    }
+
+    pub fn height(&self) -> i32 {
+        self.max_y
+    }
+
     pub fn to_slide_transform(&self) -> AffineTransform<f64> {
         let mut moving_points = Vec::new();
         let mut fixed_points = Vec::new();
@@ -878,33 +911,39 @@ impl<T: Read + Seek> Acquisition<T> {
         }
     }
 
-    pub fn get_before_ablation_image(&self) -> Result<Vec<u8>, std::io::Error> {
+    
+    pub fn get_image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
             .expect("Should have copied the reader across");
         let reader = mutex.lock().unwrap();
 
-        get_image_data(
-            reader,
-            self.before_ablation_image_start_offset,
-            self.before_ablation_image_end_offset,
-        )
+        get_image_data(reader, start, end)
     }
 
-    pub fn get_after_ablation_image(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mutex = self
-            .reader
-            .as_ref()
-            .expect("Should have copied the reader across");
-        let reader = mutex.lock().unwrap();
-
-        get_image_data(
-            reader,
-            self.after_ablation_image_start_offset,
-            self.after_ablation_image_end_offset,
-        )
+    fn get_dynamic_image(&self, start: i64, end: i64) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.get_image_data(start, end).unwrap()));
+        reader.set_format(ImageFormat::Png);
+        reader.decode().unwrap()
     }
+
+    pub fn get_before_ablation_image(&self) -> RgbaImage {
+        match self.get_dynamic_image(self.before_ablation_image_start_offset,
+            self.before_ablation_image_end_offset) {
+            DynamicImage::ImageRgba8(rgba8) => rgba8,
+            _ => panic!("Unexpected DynamicImage type")
+        }
+    }
+
+    pub fn get_after_ablation_image(&self) -> RgbaImage {
+        match self.get_dynamic_image(self.after_ablation_image_start_offset,
+            self.after_ablation_image_end_offset) {
+            DynamicImage::ImageRgba8(rgba8) => rgba8,
+            _ => panic!("Unexpected DynamicImage type")
+        }
+    }
+
 
     pub fn get_channels(&self) -> &Vec<AcquisitionChannel> {
         &self.channels
@@ -1164,7 +1203,28 @@ mod tests {
             //let transform = panorama.to_slide_transform();
 
         let resized_image = slide.create_overview_image(7500);
-        resized_image.save("slide_resize.jpeg").unwrap();
+            let path = std::path::Path::new(output_location);
+
+            for panorama in slide.get_panoramas() {
+                let panorama_image = panorama.get_image();
+                panorama_image.save(format!("{}.png", panorama.description())).unwrap();
+
+                for acquisition in panorama.get_acquisitions() {
+                    let acquisition_image = acquisition.get_before_ablation_image();
+                    acquisition_image.save(format!("{}_{}.png", panorama.description(), acquisition.description())).unwrap();
+
+                    let cur_path = path.join(format!("{}_{}.txt", panorama.description(), acquisition.description()));
+                    let mut f = File::create(cur_path).expect("Unable to create file");
+
+                    let transform = acquisition.to_slide_transform();
+                    let transform = transform.get_matrix();
+                    writeln!(f, "{},{}", acquisition.width(), acquisition.height());
+                    writeln!(f, "{},{},{},{},{},{}", transform.m11, transform.m12, transform.m13, transform.m21, transform.m22, transform.m23);
+                }
+            }
+
+        //let resized_image = slide.create_overview_image(7500);
+        //resized_image.save("slide_resize.jpeg").unwrap();
 /*
         let mut points = Vec::new();
         points.push(Vector2::new(20.0, 10.0));

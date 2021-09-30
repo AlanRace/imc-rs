@@ -108,7 +108,7 @@ fn main() {
                             let acquisition = match panorama.get_acquisition(&acquisition_opts.id) {
                                 Some(acquisition) => acquisition,
                                 None => {
-                                    println!("No such acquisition for panorama {} with ID {} (IDs are: {:?})", panorama.get_id(), acquisition_opts.id, panorama.get_acquisition_ids());
+                                    println!("No such acquisition for panorama {} with ID {} (IDs are: {:?})", panorama.id(), acquisition_opts.id, panorama.get_acquisition_ids());
                                     return;
                                 }
                             };

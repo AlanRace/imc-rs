@@ -1,6 +1,6 @@
 extern crate num_traits;
 
-use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector3, Vector2, QR};
+use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector2, Vector3, QR};
 use std::fmt;
 
 enum Direction {
@@ -35,7 +35,7 @@ pub struct AffineTransform<T>
 where
     T: TransformScalar,
 {
-    matrix: Option<Matrix3<T>>,
+    matrix: Matrix3<T>,
 }
 
 fn to_dmatrix<T>(points: Vec<Vector2<T>>) -> DMatrix<T>
@@ -76,10 +76,9 @@ where
         println!("{:?}", fixed);
         //println!("{:?}", moving.dot(&fixed));
 
-        let qr = QR::new(fixed) ; //.lu();
-        //println!("{:?}", qr);
+        let qr = QR::new(fixed); //.lu();
+                                 //println!("{:?}", qr);
         let res = qr.solve(&moving).unwrap();
-        
         // Probably a better way to do this
         // Copy data from the solution to linear equations into Matrix4
         let mut matrix = Matrix3::zeros();
@@ -95,24 +94,22 @@ where
         //matrix.m44 = T::one();
         matrix.m33 = T::one();
 
-
         println!("{:?}", matrix);
 
         AffineTransform {
             //matrix: moving,
-            matrix: Some(matrix),
+            matrix: matrix,
         }
     }
 
-    pub fn transform_point(&self, x: T, y: T) -> Option<Vector3<T>> {
-        match self.matrix {
-            Some(matrix) => {
-                let point = Vector3::new(x, y, T::one());
-                let point = matrix * point;
+    pub fn get_matrix(&self) -> &Matrix3<T> {
+        &self.matrix
+    }
 
-                Some(point)
-            },
-            None => None
-        }
+    pub fn transform_point(&self, x: T, y: T) -> Option<Vector3<T>> {
+        let point = Vector3::new(x, y, T::one());
+        let point = self.matrix * point;
+
+        Some(point)
     }
 }

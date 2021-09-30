@@ -1,5 +1,5 @@
 [workspace]
 
 members = [
-    "lib", "imc-info"
+    "lib", "imc-info", "bindings/python"
 ]
