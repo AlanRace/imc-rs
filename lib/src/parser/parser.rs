@@ -136,13 +136,13 @@ impl<T: Seek + Read> MCDParser<T> {
         }
     }
 
-    pub fn get_mcd(&mut self) -> MCD<T> {
+    pub fn mcd(&mut self) -> MCD<T> {
         let mut mcd = self
             .current_mcd
             .take()
             .expect("Can't call get_mcd() when the parse hasn't been run");
 
-        let reader = mcd.get_reader().clone();
+        let reader = mcd.reader().clone();
 
         // Add the channels to the corresponding acquisition
         for channel in self.acquisition_channels.drain(0..) {

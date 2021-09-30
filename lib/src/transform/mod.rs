@@ -1,9 +1,9 @@
 extern crate num_traits;
 
 use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector2, Vector3, QR};
-use std::fmt;
 
-enum Direction {
+#[derive(Debug)]
+pub enum Direction {
     ToSlide,
     FromSlide,
 }
@@ -35,7 +35,10 @@ pub struct AffineTransform<T>
 where
     T: TransformScalar,
 {
+    direction: Direction,
+
     matrix: Matrix3<T>,
+    inv_matix: Option<Matrix3<T>>,
 }
 
 fn to_dmatrix<T>(points: Vec<Vector2<T>>) -> DMatrix<T>
@@ -72,8 +75,8 @@ where
         let moving = to_dmatrix(moving_points);
         let fixed = to_dmatrix(fixed_points);
 
-        println!("{:?}", moving);
-        println!("{:?}", fixed);
+        //println!("{:?}", moving);
+        //println!("{:?}", fixed);
         //println!("{:?}", moving.dot(&fixed));
 
         let qr = QR::new(fixed); //.lu();
@@ -94,22 +97,41 @@ where
         //matrix.m44 = T::one();
         matrix.m33 = T::one();
 
-        println!("{:?}", matrix);
+        //println!("{:?}", matrix);
 
         AffineTransform {
-            //matrix: moving,
+            direction: Direction::ToSlide,
             matrix: matrix,
+            inv_matix: None,
         }
     }
 
-    pub fn get_matrix(&self) -> &Matrix3<T> {
+    fn get_inv_matrix(&self) -> &Matrix3<T> {
+        // TODO: invert the matrix if necessary
         &self.matrix
     }
 
-    pub fn transform_point(&self, x: T, y: T) -> Option<Vector3<T>> {
+    pub fn to_slide_matrix(&self) -> &Matrix3<T> {
+        match self.direction {
+            Direction::ToSlide => &self.matrix,
+            Direction::FromSlide => self.get_inv_matrix()
+        }
+    }
+
+    pub fn from_slide_matrix(&self) -> &Matrix3<T> {
+        match self.direction {
+            Direction::ToSlide => self.get_inv_matrix(),
+            Direction::FromSlide => &self.matrix
+        }
+    }
+    
+
+    pub fn transform_to_slide(&self, x: T, y: T) -> Option<Vector3<T>> {
         let point = Vector3::new(x, y, T::one());
-        let point = self.matrix * point;
+        let point = self.to_slide_matrix() * point;
 
         Some(point)
     }
+
+    //pub fn transform_point(&self, 
 }

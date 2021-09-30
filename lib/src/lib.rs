@@ -20,7 +20,6 @@ use std::io::Cursor;
 use image::io::Reader as ImageReader;
 use image::imageops::FilterType;
 use image::{ImageFormat, RgbImage, RgbaImage, DynamicImage};
-use image::GenericImageView; 
 
 const BUF_SIZE: usize = 4096;
 
@@ -43,7 +42,7 @@ fn u16_from_u8(a: &mut [u16], v: &[u8]) {
     }
 }
 
-fn get_image_data<T: Read + Seek>(
+fn image_data<T: Read + Seek>(
     mut source: std::sync::MutexGuard<T>,
     start_offset: i64,
     end_offset: i64,
@@ -103,11 +102,11 @@ impl<T: Seek + Read> MCD<T> {
         &self.reader
     }*/
 
-    pub fn get_reader(&self) -> &Arc<Mutex<T>> {
+    pub fn reader(&self) -> &Arc<Mutex<T>> {
         &self.reader
     }
 
-    pub fn get_slide_ids(&self) -> Vec<u16> {
+    pub fn slide_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.slides.len());
 
         for (id, _panorama) in &self.slides {
@@ -119,30 +118,30 @@ impl<T: Seek + Read> MCD<T> {
         ids
     }
 
-    pub fn get_slide(&self, id: &u16) -> Option<&Slide<T>> {
-        self.slides.get(id)
+    pub fn slide(&self, id: u16) -> Option<&Slide<T>> {
+        self.slides.get(&id)
     }
 
-    pub fn get_slides(&self) -> Vec<&Slide<T>> {
+    pub fn slides(&self) -> Vec<&Slide<T>> {
         let mut slides = Vec::new();
 
-        for id in self.get_slide_ids() {
-            slides.push(self.get_slide(&id).expect("Should only be finding slides that exist"));
+        for id in self.slide_ids() {
+            slides.push(self.slide(id).expect("Should only be finding slides that exist"));
         }
 
         slides
     }
 
-    pub fn get_channels(&self) -> Vec<&AcquisitionChannel> {
+    pub fn channels(&self) -> Vec<&AcquisitionChannel> {
         let mut channels = HashMap::new();
 
         // This should be unnecessary - hopefully there is only one set of channels per dataset?
         for (_, slide) in &self.slides {
-            for panorama in slide.get_panoramas() {
-                for acquisition in panorama.get_acquisitions() {
-                    for channel in acquisition.get_channels() {
-                        if !channels.contains_key(channel.get_name()) {
-                            channels.insert(channel.get_name(), channel);
+            for panorama in slide.panoramas() {
+                for acquisition in panorama.acquisitions() {
+                    for channel in acquisition.channels() {
+                        if !channels.contains_key(channel.name()) {
+                            channels.insert(channel.name(), channel);
                         }
                     }
                 }
@@ -265,7 +264,7 @@ impl<T: Seek + Read> MCD<T> {
             buf.clear();
         }
 
-        parser.get_mcd()
+        parser.mcd()
     }
     /*pub(crate) fn add_acquisition_channel(&mut self, channel: AcquisitionChannel) {
             let acquisition_id = channel.acquisition_id.expect("Must have an AcquisitionID or won't know which Acquisition the AcquisitionChannel belongs to");
@@ -289,16 +288,16 @@ impl<T: Seek + Read> Print for MCD<T> {
             slide.print(writer, indent + 1)?;
         }
 
-        let channels = self.get_channels();
+        let channels = self.channels();
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Channels", 25)?;
         for channel in channels {
             writeln!(
                 writer,
                 "{0: <2} | {1: <10} | {2: <10}",
-                channel.get_order_number(),
-                channel.get_name(),
-                channel.get_label()
+                channel.order_number(),
+                channel.name(),
+                channel.label()
             )?;
         }
 
@@ -336,39 +335,43 @@ pub struct Slide<T: Seek + Read> {
 }
 
 impl<T: Seek + Read> Slide<T> {
-    pub fn get_id(&self) -> u16 {
+    pub fn id(&self) -> u16 {
         self.id
     }
 
-    pub fn get_image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+    pub fn uid(&self) -> &str {
+        &self.uid
+    }
+
+    pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
             .expect("Should have copied the reader across");
         let reader = mutex.lock().unwrap();
 
-        get_image_data(
+        image_data(
             reader,
             self.image_start_offset,
             self.image_end_offset,
         )
     }
 
-    fn get_dynamic_image(&self) -> DynamicImage {
-        let mut reader = ImageReader::new(Cursor::new(self.get_image_data().unwrap()));
+    fn dynamic_image(&self) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
         reader.set_format(ImageFormat::Jpeg);
         reader.decode().unwrap()
     }
 
-    pub fn get_image(&self) -> RgbImage {
-        match self.get_dynamic_image() {
+    pub fn image(&self) -> RgbImage {
+        match self.dynamic_image() {
             DynamicImage::ImageRgb8(rgb8) => rgb8,
             _ => panic!("Unexpected DynamicImage type")
         }
     }
 
     pub fn create_overview_image(&self, width: u32) -> RgbaImage {
-        let slide_image = self.get_dynamic_image();
+        let slide_image = self.dynamic_image();
 
         // Move into function to help debugging
         match &slide_image {
@@ -393,9 +396,9 @@ impl<T: Seek + Read> Slide<T> {
         let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Nearest).to_rgba8();
         println!("Resized !");
 
-        for panorama in self.get_panoramas() {
+        for panorama in self.panoramas() {
 
-            let panorama_image = panorama.get_image();
+            let panorama_image = panorama.image();
 
             //let panorama_image = panorama_image.to_rgba8();
             
@@ -408,7 +411,7 @@ impl<T: Seek + Read> Slide<T> {
 
             for y in 0..panorama_image.height() {
                 for x in 0..panorama_image.width() {
-                    let new_point = transform.transform_point(x as f64, y as f64).unwrap();
+                    let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
 
                     let pixel = *panorama_image.get_pixel(x, y);
                     
@@ -420,7 +423,7 @@ impl<T: Seek + Read> Slide<T> {
         resized_image
     }
 
-    pub fn get_panorama_ids(&self) -> Vec<u16> {
+    pub fn panorama_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.panoramas.len());
 
         for (id, _panorama) in &self.panoramas {
@@ -432,18 +435,18 @@ impl<T: Seek + Read> Slide<T> {
         ids
     }
 
-    pub fn get_panorama(&self, id: &u16) -> Option<&Panorama<T>> {
+    pub fn panorama(&self, id: &u16) -> Option<&Panorama<T>> {
         self.panoramas.get(id)
     }
 
     // Get panoramas ordered by ID
-    pub fn get_panoramas(&self) -> Vec<&Panorama<T>> {
+    pub fn panoramas(&self) -> Vec<&Panorama<T>> {
         let mut panoramas = Vec::new();
 
-        let ids = self.get_panorama_ids();
+        let ids = self.panorama_ids();
         for id in ids {
             panoramas.push(
-                self.get_panorama(&id)
+                self.panorama(&id)
                     .expect("Should only be getting panoramas that exist"),
             );
         }
@@ -530,7 +533,7 @@ impl<T: Seek + Read> Print for Slide<T> {
             "{:indent$}{} panorama(s) with ids: {:?}",
             "",
             self.panoramas.len(),
-            self.get_panorama_ids(),
+            self.panorama_ids(),
             indent = indent + 1
         )?;
         write!(writer, "{:indent$}", "", indent = indent)?;
@@ -586,24 +589,24 @@ impl<T: Seek + Read> Panorama<T> {
         &self.description
     }
 
-    pub fn get_image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+    pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
             .expect("Should have copied the reader across");
         let reader = mutex.lock().unwrap();
 
-        get_image_data(reader, self.image_start_offset, self.image_end_offset)
+        image_data(reader, self.image_start_offset, self.image_end_offset)
     }
 
-    fn get_dynamic_image(&self) -> DynamicImage {
-        let mut reader = ImageReader::new(Cursor::new(self.get_image_data().unwrap()));
+    fn dynamic_image(&self) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
         reader.set_format(ImageFormat::Png);
         reader.decode().unwrap()
     }
 
-    pub fn get_image(&self) -> RgbaImage {
-        match self.get_dynamic_image() {
+    pub fn image(&self) -> RgbaImage {
+        match self.dynamic_image() {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
             _ => panic!("Unexpected DynamicImage type")
         }
@@ -623,7 +626,7 @@ impl<T: Seek + Read> Panorama<T> {
         }
     }
 
-    pub fn get_acquisition_ids(&self) -> Vec<u16> {
+    pub fn acquisition_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.acquisitions.len());
 
         for (id, _acquisition) in &self.acquisitions {
@@ -635,18 +638,18 @@ impl<T: Seek + Read> Panorama<T> {
         ids
     }
 
-    pub fn get_acquisition(&self, id: &u16) -> Option<&Acquisition<T>> {
+    pub fn acquisition(&self, id: &u16) -> Option<&Acquisition<T>> {
         self.acquisitions.get(id)
     }
 
     // Get acquisitions ordered by ID
-    pub fn get_acquisitions(&self) -> Vec<&Acquisition<T>> {
+    pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
         let mut acquisitions = Vec::new();
 
-        let ids = self.get_acquisition_ids();
+        let ids = self.acquisition_ids();
         for id in ids {
             acquisitions.push(
-                self.get_acquisition(&id)
+                self.acquisition(&id)
                     .expect("Should only be getting acquisitions that exist"),
             );
         }
@@ -761,7 +764,7 @@ impl<T: Seek + Read> Print for Panorama<T> {
             writer,
             "{} acquisition(s) with ids: {:?}",
             self.acquisitions.len(),
-            self.get_acquisition_ids()
+            self.acquisition_ids()
         )?;
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "", 42)?;
@@ -786,16 +789,19 @@ pub struct AcquisitionChannel {
 }
 
 impl AcquisitionChannel {
-    fn get_id(&self) -> u16 {
+    pub fn id(&self) -> u16 {
         self.id
     }
-    fn get_name(&self) -> &str {
+    pub fn acquisition_id(&self) -> u16 {
+        self.acquisition_id
+    }
+    pub fn name(&self) -> &str {
         &self.channel_name
     }
-    fn get_order_number(&self) -> i16 {
+    pub fn order_number(&self) -> i16 {
         self.order_number
     }
-    fn get_label(&self) -> &str {
+    pub fn label(&self) -> &str {
         &self.channel_label
     }
 }
@@ -912,32 +918,32 @@ impl<T: Read + Seek> Acquisition<T> {
     }
 
     
-    pub fn get_image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
+    pub fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
             .expect("Should have copied the reader across");
         let reader = mutex.lock().unwrap();
 
-        get_image_data(reader, start, end)
+        image_data(reader, start, end)
     }
 
-    fn get_dynamic_image(&self, start: i64, end: i64) -> DynamicImage {
-        let mut reader = ImageReader::new(Cursor::new(self.get_image_data(start, end).unwrap()));
+    fn dynamic_image(&self, start: i64, end: i64) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.image_data(start, end).unwrap()));
         reader.set_format(ImageFormat::Png);
         reader.decode().unwrap()
     }
 
-    pub fn get_before_ablation_image(&self) -> RgbaImage {
-        match self.get_dynamic_image(self.before_ablation_image_start_offset,
+    pub fn before_ablation_image(&self) -> RgbaImage {
+        match self.dynamic_image(self.before_ablation_image_start_offset,
             self.before_ablation_image_end_offset) {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
             _ => panic!("Unexpected DynamicImage type")
         }
     }
 
-    pub fn get_after_ablation_image(&self) -> RgbaImage {
-        match self.get_dynamic_image(self.after_ablation_image_start_offset,
+    pub fn after_ablation_image(&self) -> RgbaImage {
+        match self.dynamic_image(self.after_ablation_image_start_offset,
             self.after_ablation_image_end_offset) {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
             _ => panic!("Unexpected DynamicImage type")
@@ -945,7 +951,7 @@ impl<T: Read + Seek> Acquisition<T> {
     }
 
 
-    pub fn get_channels(&self) -> &Vec<AcquisitionChannel> {
+    pub fn channels(&self) -> &Vec<AcquisitionChannel> {
         &self.channels
     }
 }
@@ -1172,7 +1178,7 @@ mod tests {
         std::fs::write("tmp.png", acquisition.get_after_ablation_image().unwrap())
             .expect("Unable to write file");*/
 
-        let slide = mcd.get_slide(&1).unwrap();
+        let slide = mcd.slide(1).unwrap();
 
         //std::fs::write("slide.jpeg", slide.get_image().unwrap())
         //    .expect("Unable to write file");
@@ -1202,22 +1208,22 @@ mod tests {
 
             //let transform = panorama.to_slide_transform();
 
-        let resized_image = slide.create_overview_image(7500);
+            let output_location = "/home/alan/Documents/Work/Nicole/Salmonella/";
             let path = std::path::Path::new(output_location);
 
-            for panorama in slide.get_panoramas() {
-                let panorama_image = panorama.get_image();
+            for panorama in slide.panoramas() {
+                let panorama_image = panorama.image();
                 panorama_image.save(format!("{}.png", panorama.description())).unwrap();
 
-                for acquisition in panorama.get_acquisitions() {
-                    let acquisition_image = acquisition.get_before_ablation_image();
+                for acquisition in panorama.acquisitions() {
+                    let acquisition_image = acquisition.before_ablation_image();
                     acquisition_image.save(format!("{}_{}.png", panorama.description(), acquisition.description())).unwrap();
 
                     let cur_path = path.join(format!("{}_{}.txt", panorama.description(), acquisition.description()));
                     let mut f = File::create(cur_path).expect("Unable to create file");
 
                     let transform = acquisition.to_slide_transform();
-                    let transform = transform.get_matrix();
+                    let transform = transform.to_slide_matrix();
                     writeln!(f, "{},{}", acquisition.width(), acquisition.height());
                     writeln!(f, "{},{},{},{},{},{}", transform.m11, transform.m12, transform.m13, transform.m21, transform.m22, transform.m23);
                 }

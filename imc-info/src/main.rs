@@ -85,30 +85,30 @@ fn main() {
     // (as below), requesting just the name used, or both at the same time
     match opts.slide_command {
         Some(SlideCommand::Slide(slide_opts)) => {
-            let slide = match mcd.get_slide(&slide_opts.id) {
+            let slide = match mcd.slide(&slide_opts.id) {
                 Some(slide) => slide,
                 None => {
-                    println!("No such slide with ID {} (IDs are: {:?})", slide_opts.id, mcd.get_slide_ids());
+                    println!("No such slide with ID {} (IDs are: {:?})", slide_opts.id, mcd.slide_ids());
                     return;
                 }
             };
 
             match slide_opts.panorama_command {
                 Some(PanoramaCommand::Panorama(panorama_opts)) => {
-                    let panorama = match slide.get_panorama(&panorama_opts.id) {
+                    let panorama = match slide.panorama(&panorama_opts.id) {
                         Some(panorama) => panorama,
                         None => {
-                            println!("No such panorama for slide {} with ID {} (IDs are: {:?})", slide.get_id(), panorama_opts.id, slide.get_panorama_ids());
+                            println!("No such panorama for slide {} with ID {} (IDs are: {:?})", slide.id(), panorama_opts.id, slide.panorama_ids());
                             return;
                         }
                     };
 
                     match panorama_opts.acquisition_command {
                         Some(AcquisitionCommand::Acquisition(acquisition_opts)) => {
-                            let acquisition = match panorama.get_acquisition(&acquisition_opts.id) {
+                            let acquisition = match panorama.acquisition(&acquisition_opts.id) {
                                 Some(acquisition) => acquisition,
                                 None => {
-                                    println!("No such acquisition for panorama {} with ID {} (IDs are: {:?})", panorama.id(), acquisition_opts.id, panorama.get_acquisition_ids());
+                                    println!("No such acquisition for panorama {} with ID {} (IDs are: {:?})", panorama.id(), acquisition_opts.id, panorama.acquisition_ids());
                                     return;
                                 }
                             };
