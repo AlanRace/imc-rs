@@ -1,9 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap};
 
 use quick_xml::events::Event;
 
 use super::{
-    AcquisitionXML, Acquisition, AcquisitionROI, AcquisitionChannel, DataFormat, ImageFormat, Slide, Panorama, PanoramaXML,
+    AcquisitionXML, Acquisition, AcquisitionROI, AcquisitionChannel, DataFormat, ImageFormat, Panorama, PanoramaXML,
     MCD, ROIPoint, SlideXML, AcquisitionChannelXML, ROIType
 };
 

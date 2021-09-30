@@ -343,6 +343,30 @@ impl<T: Seek + Read> Slide<T> {
         &self.uid
     }
 
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn width_in_um(&self) -> f64 {
+        self.width_um
+    }
+
+    pub fn height_in_um(&self) -> f64 {
+        self.height_um
+    }
+
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+
+    pub fn image_file(&self) -> &str {
+        &self.image_file
+    }
+
+    pub fn software_version(&self) -> &str {
+        &self.sw_version
+    }
+
     pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader

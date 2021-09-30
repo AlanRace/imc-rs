@@ -88,6 +88,30 @@ impl Slide {
     pub fn uid(&self) -> PyResult<String> {
         Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").uid().to_owned())
     }
+
+    pub fn description(&self) -> PyResult<String> {
+        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").description().to_owned())
+    }
+
+    pub fn width_in_um(&self) -> PyResult<f64> {
+        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").width_in_um().to_owned())
+    }
+
+    pub fn height_in_um(&self) -> PyResult<f64> {
+        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").height_in_um().to_owned())
+    }
+
+    pub fn filename(&self) -> PyResult<String> {
+        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").filename().to_owned())
+    }
+
+    pub fn image_file(&self) -> PyResult<String> {
+        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").image_file().to_owned())
+    }
+
+    pub fn software_version(&self) -> PyResult<String> {
+        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").software_version().to_owned())
+    }
 }
 
 #[pymodule]

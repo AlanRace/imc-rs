@@ -1,4 +1,4 @@
-use super::{MCD, Acquisition, AcquisitionChannel, Slide, DataFormat, ImageFormat, Panorama};
+use super::{Acquisition, AcquisitionChannel, Slide, DataFormat, ImageFormat, Panorama};
 use std::collections::HashMap;
 use std::io::{Seek, Read};
 

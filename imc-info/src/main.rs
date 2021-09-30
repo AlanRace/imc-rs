@@ -85,7 +85,7 @@ fn main() {
     // (as below), requesting just the name used, or both at the same time
     match opts.slide_command {
         Some(SlideCommand::Slide(slide_opts)) => {
-            let slide = match mcd.slide(&slide_opts.id) {
+            let slide = match mcd.slide(slide_opts.id) {
                 Some(slide) => slide,
                 None => {
                     println!("No such slide with ID {} (IDs are: {:?})", slide_opts.id, mcd.slide_ids());
