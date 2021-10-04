@@ -459,8 +459,8 @@ impl<T: Seek + Read> Slide<T> {
         ids
     }
 
-    pub fn panorama(&self, id: &u16) -> Option<&Panorama<T>> {
-        self.panoramas.get(id)
+    pub fn panorama(&self, id: u16) -> Option<&Panorama<T>> {
+        self.panoramas.get(&id)
     }
 
     // Get panoramas ordered by ID
@@ -470,7 +470,7 @@ impl<T: Seek + Read> Slide<T> {
         let ids = self.panorama_ids();
         for id in ids {
             panoramas.push(
-                self.panorama(&id)
+                self.panorama(id)
                     .expect("Should only be getting panoramas that exist"),
             );
         }
@@ -609,8 +609,20 @@ impl<T: Seek + Read> Panorama<T> {
         self.id
     }
 
+    pub fn slide_id(&self) -> u16 {
+        self.slide_id
+    }
+
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    pub fn dimensions(&self) -> (i64, i64) {
+        (self.pixel_width, self.pixel_height)
+    }
+
+    pub fn pixel_scale_coef(&self) -> f64 {
+        self.pixel_scale_coef
     }
 
     pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
@@ -662,8 +674,8 @@ impl<T: Seek + Read> Panorama<T> {
         ids
     }
 
-    pub fn acquisition(&self, id: &u16) -> Option<&Acquisition<T>> {
-        self.acquisitions.get(id)
+    pub fn acquisition(&self, id: u16) -> Option<&Acquisition<T>> {
+        self.acquisitions.get(&id)
     }
 
     // Get acquisitions ordered by ID
@@ -673,7 +685,7 @@ impl<T: Seek + Read> Panorama<T> {
         let ids = self.acquisition_ids();
         for id in ids {
             acquisitions.push(
-                self.acquisition(&id)
+                self.acquisition(id)
                     .expect("Should only be getting acquisitions that exist"),
             );
         }

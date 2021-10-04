@@ -95,7 +95,7 @@ fn main() {
 
             match slide_opts.panorama_command {
                 Some(PanoramaCommand::Panorama(panorama_opts)) => {
-                    let panorama = match slide.panorama(&panorama_opts.id) {
+                    let panorama = match slide.panorama(panorama_opts.id) {
                         Some(panorama) => panorama,
                         None => {
                             println!("No such panorama for slide {} with ID {} (IDs are: {:?})", slide.id(), panorama_opts.id, slide.panorama_ids());
@@ -105,7 +105,7 @@ fn main() {
 
                     match panorama_opts.acquisition_command {
                         Some(AcquisitionCommand::Acquisition(acquisition_opts)) => {
-                            let acquisition = match panorama.acquisition(&acquisition_opts.id) {
+                            let acquisition = match panorama.acquisition(acquisition_opts.id) {
                                 Some(acquisition) => acquisition,
                                 None => {
                                     println!("No such acquisition for panorama {} with ID {} (IDs are: {:?})", panorama.id(), acquisition_opts.id, panorama.acquisition_ids());

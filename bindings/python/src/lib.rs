@@ -1,5 +1,11 @@
+//! python bindings for imc-rs, a library for accessing imaging mass cytometry data.
+
 use pyo3::exceptions;
 use pyo3::prelude::*;
+
+// For passing back images/data
+use ndarray::Array;
+use numpy::{IntoPyArray, PyArray3};
 
 use std::fs::File;
 use std::sync::Arc;
@@ -53,6 +59,22 @@ impl MCD {
         ids.sort();
 
         Ok(ids)
+    }
+
+    pub fn panorama(&self, id: u16) -> PyResult<Panorama> {
+        for slide in self.mcd.slides() {
+            for panorama in slide.panoramas() {
+                if panorama.id() == id {
+                    return Ok(Panorama {
+                        mcd: self.mcd.clone(),
+                        id,
+                        slide_id: slide.id(),
+                    });
+                }
+            }
+        }
+
+        Err(PyErr::new::<exceptions::PyValueError, _>(format!("No such panorama with id {}", id)))
     }
 
     pub fn acquisition_ids(&self) -> PyResult<Vec<u16>> {
@@ -113,6 +135,47 @@ impl Slide {
         Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").software_version().to_owned())
     }
 }
+
+#[pyclass]
+struct Panorama {
+    mcd: Arc<imc_rs::MCD<std::fs::File>>,
+
+    id: u16,
+    slide_id: u16,
+}
+
+impl Panorama {
+    fn get_panorama(&self) -> &imc_rs::Panorama<std::fs::File> {
+        self.mcd.slide(self.slide_id).expect("Should be valid slide id").panorama(self.id).expect("Should be valid panorama id")
+    }
+}
+
+
+#[pymethods]
+impl Panorama {
+    pub fn id(&self) -> PyResult<u16> {
+        Ok(self.id)
+    }
+
+    pub fn slide_id(&self) -> PyResult<u16> {
+        Ok(self.slide_id)
+    }
+
+    pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
+        let panorama = self.get_panorama();
+
+        let image = panorama.image();
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let raw_image = image.into_raw();
+        
+        //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
+
+        let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
+        array.into_pyarray(py)
+    }
+}
+
 
 #[pymodule]
 fn pyimc(_py: Python, m: &PyModule) -> PyResult<()> {

@@ -18,6 +18,8 @@ classifier = [
 
 [dependencies]
 imc-rs = { path = "../../lib" }
+numpy = "0.14"
+ndarray = ">= 0.13, < 0.16"
 
 [dependencies.pyo3]
 version = "0.14.5"
