@@ -15,8 +15,6 @@ struct MCD {
     mcd: Arc<imc_rs::MCD<std::fs::File>>,
 }
 
-
-
 #[pymethods]
 impl MCD {
     #[staticmethod]
@@ -45,7 +43,10 @@ impl MCD {
                 mcd: self.mcd.clone(),
                 id,
             }),
-            None => Err(PyErr::new::<exceptions::PyValueError, _>(format!("No such slide with id {}", id)))
+            None => Err(PyErr::new::<exceptions::PyValueError, _>(format!(
+                "No such slide with id {}",
+                id
+            ))),
         }
     }
 
@@ -56,7 +57,7 @@ impl MCD {
             ids.append(&mut slide.panorama_ids());
         }
 
-        ids.sort();
+        ids.sort_unstable();
 
         Ok(ids)
     }
@@ -74,7 +75,10 @@ impl MCD {
             }
         }
 
-        Err(PyErr::new::<exceptions::PyValueError, _>(format!("No such panorama with id {}", id)))
+        Err(PyErr::new::<exceptions::PyValueError, _>(format!(
+            "No such panorama with id {}",
+            id
+        )))
     }
 
     pub fn acquisition_ids(&self) -> PyResult<Vec<u16>> {
@@ -86,11 +90,10 @@ impl MCD {
             }
         }
 
-        ids.sort();
+        ids.sort_unstable();
 
         Ok(ids)
     }
-
 
     pub fn acquisition(&self, id: u16) -> PyResult<Acquisition> {
         for slide in self.mcd.slides() {
@@ -108,10 +111,12 @@ impl MCD {
             }
         }
 
-        Err(PyErr::new::<exceptions::PyValueError, _>(format!("No such acquisition with id {}", id)))
+        Err(PyErr::new::<exceptions::PyValueError, _>(format!(
+            "No such acquisition with id {}",
+            id
+        )))
     }
 }
-
 
 #[pyclass]
 struct Slide {
@@ -119,8 +124,6 @@ struct Slide {
 
     id: u16,
 }
-
-
 
 impl Slide {
     fn get_slide(&self) -> &imc_rs::Slide<std::fs::File> {
@@ -135,31 +138,66 @@ impl Slide {
     }
 
     pub fn uid(&self) -> PyResult<String> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").uid().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .uid()
+            .to_owned())
     }
 
     pub fn description(&self) -> PyResult<String> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").description().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .description()
+            .to_owned())
     }
 
     pub fn width_in_um(&self) -> PyResult<f64> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").width_in_um().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .width_in_um()
+            .to_owned())
     }
 
     pub fn height_in_um(&self) -> PyResult<f64> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").height_in_um().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .height_in_um()
+            .to_owned())
     }
 
     pub fn filename(&self) -> PyResult<String> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").filename().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .filename()
+            .to_owned())
     }
 
     pub fn image_file(&self) -> PyResult<String> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").image_file().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .image_file()
+            .to_owned())
     }
 
     pub fn software_version(&self) -> PyResult<String> {
-        Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").software_version().to_owned())
+        Ok(self
+            .mcd
+            .slide(self.id)
+            .expect("Slide ID was checked to exist during creation")
+            .software_version()
+            .to_owned())
     }
 
     pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
@@ -169,7 +207,7 @@ impl Slide {
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
-        
+
         //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
 
         let array = Array::from_shape_vec((height, width, 3), raw_image).unwrap();
@@ -187,10 +225,13 @@ struct Panorama {
 
 impl Panorama {
     fn get_panorama(&self) -> &imc_rs::Panorama<std::fs::File> {
-        self.mcd.slide(self.slide_id).expect("Should be valid slide id").panorama(self.id).expect("Should be valid panorama id")
+        self.mcd
+            .slide(self.slide_id)
+            .expect("Should be valid slide id")
+            .panorama(self.id)
+            .expect("Should be valid panorama id")
     }
 }
-
 
 #[pymethods]
 impl Panorama {
@@ -209,14 +250,13 @@ impl Panorama {
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
-        
+
         //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
 
         let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
         array.into_pyarray(py)
     }
 }
-
 
 #[pyclass]
 struct Acquisition {
@@ -229,10 +269,15 @@ struct Acquisition {
 
 impl Acquisition {
     fn get_acquisition(&self) -> &imc_rs::Acquisition<std::fs::File> {
-        self.mcd.slide(self.slide_id).expect("Should be valid slide id").panorama(self.panorama_id).expect("Should be valid panorama id").acquisition(self.id).expect("Should be valid acquisition id")
+        self.mcd
+            .slide(self.slide_id)
+            .expect("Should be valid slide id")
+            .panorama(self.panorama_id)
+            .expect("Should be valid panorama id")
+            .acquisition(self.id)
+            .expect("Should be valid acquisition id")
     }
 }
-
 
 #[pymethods]
 impl Acquisition {
@@ -255,7 +300,7 @@ impl Acquisition {
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
-        
+
         //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
 
         let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
@@ -269,14 +314,13 @@ impl Acquisition {
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
-        
+
         //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
 
         let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
         array.into_pyarray(py)
     }
 }
-
 
 #[pymodule]
 fn pyimc(_py: Python, m: &PyModule) -> PyResult<()> {

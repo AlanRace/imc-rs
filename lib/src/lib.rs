@@ -18,18 +18,15 @@ use std::convert::TryInto;
 
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
-use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
+use image::{DynamicImage, ImageFormat, Pixel, RgbImage, Rgba, RgbaImage};
 use std::io::Cursor;
 
 const BUF_SIZE: usize = 4096;
 
-fn find_mcd_start(chunk: &std::vec::Vec<u8>, chunk_size: usize) -> usize {
+fn find_mcd_start(chunk: &[u8], chunk_size: usize) -> usize {
     for start_index in 0..chunk_size {
-        match std::str::from_utf8(&chunk[start_index..]) {
-            Ok(_data) => {
-                return start_index - 1;
-            }
-            Err(_) => {}
+        if let Ok(_data) = std::str::from_utf8(&chunk[start_index..]) {
+            return start_index - 1;
         }
     }
 
@@ -284,10 +281,12 @@ impl<T: Seek + Read> Print for MCD<T> {
 
         match self.xmlns.as_ref() {
             Some(xmlns) => writeln!(writer, "XML Namespace: {}", xmlns)?,
-            None => {}
+            None => {
+                todo!()
+            }
         }
 
-        for (_id, slide) in &self.slides {
+        for slide in self.slides.values() {
             slide.print(writer, indent + 1)?;
         }
 
@@ -421,13 +420,14 @@ impl<T: Seek + Read> Slide<T> {
             .to_rgba8();
         println!("Resized !");
 
+        let scale = 75000.0 / width as f64;
+
         for panorama in self.panoramas() {
             let panorama_image = panorama.image();
 
             //let panorama_image = panorama_image.to_rgba8();
 
             let bounding_box = panorama.slide_bounding_box();
-
             let transform = panorama.to_slide_transform();
 
             println!("[Panorama] Bounding box = {:?}", bounding_box);
@@ -440,11 +440,53 @@ impl<T: Seek + Read> Slide<T> {
                     let pixel = *panorama_image.get_pixel(x, y);
 
                     resized_image.put_pixel(
-                        (new_point[0] / 10.0).round() as u32,
-                        ((self.height_um - new_point[1]) / 10.0).round() as u32,
+                        (new_point[0] / scale).round() as u32,
+                        ((self.height_um - new_point[1]) / scale).round() as u32,
                         pixel,
                     );
                 }
+            }
+
+            for acquisition in panorama.acquisitions() {
+                let bounding_box = acquisition.slide_bounding_box();
+                let transform = acquisition.to_slide_transform();
+
+                println!("[Acquisition] Bounding box = {:?}", bounding_box);
+                println!("[Acquisition] Transform = {:?}", transform);
+
+                let data = acquisition.channel_data(ChannelIdentifier::Name("Ir(191)".to_string()));
+
+                let mut index = 0;
+
+                for y in 0..data.height {
+                    for x in 0..data.width {
+                        let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
+
+                        let g = ((data.data[index] / 100.0) * 255.0) as u8;
+                        let g = g as f64 / 255.0;
+
+                        //let pixel = Rgba::from_channels(0, g, 0, g);
+
+                        let current_pixel = resized_image
+                            .get_pixel_mut(
+                                (new_point[0] / scale).round() as u32,
+                                ((self.height_um - new_point[1]) / scale).round() as u32,
+                            )
+                            .channels_mut();
+
+                        let r = (current_pixel[0] as f64 / 255.0) * (1.0 - g);
+                        let g = g * g + (current_pixel[1] as f64 / 255.0) * (1.0 - g);
+                        let b = (current_pixel[2] as f64 / 255.0) * (1.0 - g);
+
+                        current_pixel[0] = (r * 255.0) as u8;
+                        current_pixel[1] = (g * 255.0) as u8;
+                        current_pixel[2] = (b * 255.0) as u8;
+
+                        index += 1;
+                    }
+                }
+
+                println!("Finished reading data");
             }
         }
 
@@ -846,6 +888,12 @@ impl<T: Seek + Read + 'static> fmt::Display for Panorama<T> {
     }
 }
 
+pub enum ChannelIdentifier {
+    Order(i16),
+    Name(String),
+    Label(String),
+}
+
 #[derive(Debug)]
 pub struct AcquisitionChannel {
     id: u16,
@@ -922,6 +970,13 @@ pub struct BoundingBox {
     min_y: f64,
     width: f64,
     height: f64,
+}
+
+pub struct ChannelImage {
+    width: i32,
+    height: i32,
+    range: (f32, f32),
+    data: Vec<f32>,
 }
 
 impl<T: Read + Seek> Acquisition<T> {
@@ -1026,6 +1081,90 @@ impl<T: Read + Seek> Acquisition<T> {
 
     pub fn channels(&self) -> &Vec<AcquisitionChannel> {
         &self.channels
+    }
+
+    // Return whether the acquisition has run to completion (checks the size of the recorded data
+    // compared to the expected data size)
+    pub fn is_complete(&self) -> bool {
+        let expected_size: usize = self.channels().len()
+            * self.max_x as usize
+            * self.max_y as usize
+            * self.value_bytes as usize;
+        let measured_size: usize = self.data_end_offset as usize - self.data_start_offset as usize;
+
+        println!("Expected: {} | Measured: {}", expected_size, measured_size);
+
+        expected_size == measured_size
+    }
+
+    pub fn channel_data(&self, identifier: ChannelIdentifier) -> ChannelImage {
+        let channel = self.channel(identifier).unwrap();
+
+        let measured_size: usize = self.data_end_offset as usize - self.data_start_offset as usize;
+        let spectrum_size: u64 = self.channels().len() as u64 * self.value_bytes as u64;
+        let num_spectra = measured_size / spectrum_size as usize;
+
+        let mut data = vec![0.0f32; num_spectra];
+
+        let offset =
+            self.data_start_offset as u64 + channel.order_number as u64 * self.value_bytes as u64;
+
+        let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
+        // TODO: Currently this only works for f32
+        let mut buf = [0; 4];
+
+        let mut min_value = f32::MAX;
+        let mut max_value = f32::MIN;
+
+        // TODO: Handle this properly without unwrapping
+        reader.seek(SeekFrom::Start(offset)).unwrap();
+        for data_point in data.iter_mut() {
+            reader.read_exact(&mut buf).unwrap();
+
+            *data_point = f32::from_le_bytes(buf);
+
+            if *data_point > min_value {
+                min_value = *data_point;
+            }
+            if *data_point < max_value {
+                max_value = *data_point;
+            }
+
+            reader
+                .seek(SeekFrom::Current(spectrum_size as i64 - 4))
+                .unwrap();
+        }
+
+        ChannelImage {
+            width: self.max_x,
+            height: self.max_y,
+            range: (min_value, max_value),
+            data,
+        }
+    }
+
+    pub fn channel(&self, identifier: ChannelIdentifier) -> Option<&AcquisitionChannel> {
+        for channel in &self.channels {
+            match identifier {
+                ChannelIdentifier::Order(order) => {
+                    if channel.order_number == order {
+                        return Some(channel);
+                    }
+                }
+                ChannelIdentifier::Name(ref name) => {
+                    if &channel.channel_name == name {
+                        return Some(channel);
+                    }
+                }
+                ChannelIdentifier::Label(ref label) => {
+                    if &channel.channel_label == label {
+                        return Some(channel);
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -1318,10 +1457,10 @@ mod tests {
             }
         }
 
-        Ok(())
-
-        //let resized_image = slide.create_overview_image(7500);
-        //resized_image.save("slide_resize.jpeg").unwrap();
+        let resized_image = slide.create_overview_image(15000);
+        resized_image
+            .save(path.join("slide_overview.jpeg"))
+            .unwrap();
         /*
         let mut points = Vec::new();
         points.push(Vector2::new(20.0, 10.0));
@@ -1340,5 +1479,7 @@ mod tests {
         let transform = AffineTransform::from_points(points, points2);*/
 
         //println!("{}", combined_xml);
+
+        Ok(())
     }
 }
