@@ -90,6 +90,26 @@ impl MCD {
 
         Ok(ids)
     }
+
+
+    pub fn acquisition(&self, id: u16) -> PyResult<Acquisition> {
+        for slide in self.mcd.slides() {
+            for panorama in slide.panoramas() {
+                for acquisition in panorama.acquisitions() {
+                    if acquisition.id() == id {
+                        return Ok(Acquisition {
+                            mcd: self.mcd.clone(),
+                            id,
+                            panorama_id: panorama.id(),
+                            slide_id: slide.id(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Err(PyErr::new::<exceptions::PyValueError, _>(format!("No such acquisition with id {}", id)))
+    }
 }
 
 
@@ -100,6 +120,13 @@ struct Slide {
     id: u16,
 }
 
+
+
+impl Slide {
+    fn get_slide(&self) -> &imc_rs::Slide<std::fs::File> {
+        self.mcd.slide(self.id).expect("Should be valid slide id")
+    }
+}
 
 #[pymethods]
 impl Slide {
@@ -134,6 +161,20 @@ impl Slide {
     pub fn software_version(&self) -> PyResult<String> {
         Ok(self.mcd.slide(self.id).expect("Slide ID was checked to exist during creation").software_version().to_owned())
     }
+
+    pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
+        let slide = self.get_slide();
+
+        let image = slide.image();
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let raw_image = image.into_raw();
+        
+        //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
+
+        let array = Array::from_shape_vec((height, width, 3), raw_image).unwrap();
+        array.into_pyarray(py)
+    }
 }
 
 #[pyclass]
@@ -165,6 +206,66 @@ impl Panorama {
         let panorama = self.get_panorama();
 
         let image = panorama.image();
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let raw_image = image.into_raw();
+        
+        //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
+
+        let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
+        array.into_pyarray(py)
+    }
+}
+
+
+#[pyclass]
+struct Acquisition {
+    mcd: Arc<imc_rs::MCD<std::fs::File>>,
+
+    id: u16,
+    panorama_id: u16,
+    slide_id: u16,
+}
+
+impl Acquisition {
+    fn get_acquisition(&self) -> &imc_rs::Acquisition<std::fs::File> {
+        self.mcd.slide(self.slide_id).expect("Should be valid slide id").panorama(self.panorama_id).expect("Should be valid panorama id").acquisition(self.id).expect("Should be valid acquisition id")
+    }
+}
+
+
+#[pymethods]
+impl Acquisition {
+    pub fn id(&self) -> PyResult<u16> {
+        Ok(self.id)
+    }
+
+    pub fn panorama_id(&self) -> PyResult<u16> {
+        Ok(self.panorama_id)
+    }
+
+    pub fn slide_id(&self) -> PyResult<u16> {
+        Ok(self.slide_id)
+    }
+
+    pub fn before_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
+        let acquisition = self.get_acquisition();
+
+        let image = acquisition.before_ablation_image();
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let raw_image = image.into_raw();
+        
+        //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
+
+        let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
+        array.into_pyarray(py)
+    }
+
+    pub fn after_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
+        let acquisition = self.get_acquisition();
+
+        let image = acquisition.after_ablation_image();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();

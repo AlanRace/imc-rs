@@ -894,6 +894,10 @@ pub struct BoundingBox {
 }
 
 impl<T: Read + Seek> Acquisition<T> {
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+
     pub fn description(&self) -> &str {
         &self.description
     }
