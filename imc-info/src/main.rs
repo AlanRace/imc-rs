@@ -1,14 +1,14 @@
-use clap::{AppSettings, Clap};
+use clap::Parser;
 use imc_rs::MCD;
 
 /// imc-info extracts information from IMC data sets stored in the *.mcd format.
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "0.1", author = "Alan Race <alan.race@uni-marburg.de>")]
-#[clap(setting = AppSettings::ColoredHelp)]
+//#[clap(setting = AppSettings::ColoredHelp)]
 struct Opts {
     /// Sets a custom config file. Could have been an Option<T> with no default too
-    #[clap(short, long, default_value = "default.conf")]
-    config: String,
+    //#[clap(short, long, default_value = "default.conf")]
+    //config: String,
     /// *.mcd filename
     filename: String,
     /// A level of verbosity, and can be used multiple times
@@ -19,13 +19,13 @@ struct Opts {
     slide_command: Option<SlideCommand>,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 enum SlideCommand {
     Slide(Slide),
 }
 
 /// A subcommand for controlling slides
-#[derive(Clap)]
+#[derive(Parser)]
 struct Slide {
     /// Print debug info
     id: u16,
@@ -34,13 +34,13 @@ struct Slide {
     panorama_command: Option<PanoramaCommand>,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 enum PanoramaCommand {
     Panorama(Panorama),
 }
 
 /// A subcommand for controlling panoramas
-#[derive(Clap)]
+#[derive(Parser)]
 struct Panorama {
     /// Print debug info
     id: u16,
@@ -49,14 +49,13 @@ struct Panorama {
     acquisition_command: Option<AcquisitionCommand>,
 }
 
-
-#[derive(Clap)]
+#[derive(Parser)]
 enum AcquisitionCommand {
     Acquisition(Acquisition),
 }
 
 /// A subcommand for controlling acquisition
-#[derive(Clap)]
+#[derive(Parser)]
 struct Acquisition {
     /// Print debug info
     id: u16,
@@ -88,7 +87,11 @@ fn main() {
             let slide = match mcd.slide(slide_opts.id) {
                 Some(slide) => slide,
                 None => {
-                    println!("No such slide with ID {} (IDs are: {:?})", slide_opts.id, mcd.slide_ids());
+                    println!(
+                        "No such slide with ID {} (IDs are: {:?})",
+                        slide_opts.id,
+                        mcd.slide_ids()
+                    );
                     return;
                 }
             };
@@ -98,7 +101,12 @@ fn main() {
                     let panorama = match slide.panorama(panorama_opts.id) {
                         Some(panorama) => panorama,
                         None => {
-                            println!("No such panorama for slide {} with ID {} (IDs are: {:?})", slide.id(), panorama_opts.id, slide.panorama_ids());
+                            println!(
+                                "No such panorama for slide {} with ID {} (IDs are: {:?})",
+                                slide.id(),
+                                panorama_opts.id,
+                                slide.panorama_ids()
+                            );
                             return;
                         }
                     };
@@ -114,7 +122,7 @@ fn main() {
                             };
 
                             println!("{}", acquisition);
-                        },
+                        }
                         None => {
                             println!("{}", panorama);
                         }
@@ -124,7 +132,7 @@ fn main() {
                     println!("{}", slide);
                 }
             }
-        },
+        }
         None => {
             println!("{}", mcd);
         }

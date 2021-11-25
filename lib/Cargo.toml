@@ -8,6 +8,6 @@ edition = "2018"
 
 [dependencies]
 quick-xml = "0.22.0"
-nalgebra = "0.29.0"
+nalgebra = "0.25.0" # Higher versions run into bug with rust-analyzer
 num-traits = "0.2"
 image = "0.23"

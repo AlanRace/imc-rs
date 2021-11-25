@@ -1,16 +1,13 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use quick_xml::events::Event;
 
 use super::{
-    AcquisitionXML, Acquisition, AcquisitionROI, AcquisitionChannel, DataFormat, ImageFormat, Panorama, PanoramaXML,
-    MCD, ROIPoint, SlideXML, AcquisitionChannelXML, ROIType
+    Acquisition, AcquisitionChannel, AcquisitionChannelXML, AcquisitionROI, AcquisitionXML,
+    DataFormat, ImageFormat, Panorama, PanoramaXML, ROIPoint, ROIType, SlideXML, MCD,
 };
 
-
 use std::io::prelude::*;
-
-
 
 #[derive(Clone, Copy, Debug)]
 pub enum ParserState {
@@ -114,7 +111,7 @@ pub struct MCDParser<T: Seek + Read> {
 impl<T: Seek + Read> MCDParser<T> {
     pub fn new(mcd: MCD<T>) -> MCDParser<T> {
         MCDParser {
-            current_mcd: Some(mcd), 
+            current_mcd: Some(mcd),
             state: ParserState::Start,
             sub_state: ParserState::Start,
             errors: std::collections::VecDeque::new(),
@@ -124,7 +121,7 @@ impl<T: Seek + Read> MCDParser<T> {
             acquisition_channels: Vec::new(),
             acquisition_rois: Vec::new(),
 
-            // TODO: Do we need this? 
+            // TODO: Do we need this?
             roi_points: Vec::new(),
 
             current_slide: None,
@@ -149,7 +146,7 @@ impl<T: Seek + Read> MCDParser<T> {
             let acquisition = self
                 .acquisitions
                 .get_mut(&channel.acquisition_id)
-                .expect(&format!("Missing AcquisitionID {}", channel.acquisition_id));
+                .unwrap_or_else(|| panic!("Missing AcquisitionID {}", channel.acquisition_id));
             acquisition.channels.push(channel);
         }
 
@@ -175,21 +172,24 @@ impl<T: Seek + Read> MCDParser<T> {
                 )
                 .expect("Should have Panorama with same ID as AcquisitionROI");
 
-                panorama.acquisitions.insert(acquisition.id, acquisition);
+            panorama.acquisitions.insert(acquisition.id, acquisition);
         }
 
         for (id, mut panorama) in self.panoramas.drain() {
             //mcd.panoramas.insert(id, panorama);
             let slide_id = panorama.slide_id;
 
-            let slide = mcd.slides.get_mut(&slide_id).expect(&format!("Missing Slide with ID {}", slide_id));
+            let slide = mcd
+                .slides
+                .get_mut(&slide_id)
+                .unwrap_or_else(|| panic!("Missing Slide with ID {}", slide_id));
             panorama.reader = Some(reader.clone());
             slide.panoramas.insert(id, panorama);
         }
 
         // Update the acquisitions
         //mcd.acquisitions = acquisitions;
-        for (_, slide) in &mut mcd.slides {
+        for slide in mcd.slides.values_mut() {
             slide.reader = Some(reader.clone());
         }
 
@@ -201,7 +201,7 @@ impl<T: Seek + Read> MCDParser<T> {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.errors.len() > 0
+        !self.errors.is_empty()
     }
 
     pub fn pop_error_front(&mut self) -> Option<String> {
@@ -332,7 +332,10 @@ impl<T: Seek + Read> MCDParser<T> {
             Event::End(e) => match e.local_name() {
                 b"Slide" => {
                     let slide = self.current_slide.take().unwrap();
-                    self.current_mcd.as_mut().unwrap().slides
+                    self.current_mcd
+                        .as_mut()
+                        .unwrap()
+                        .slides
                         .insert(slide.id.unwrap(), slide.into());
 
                     self.state = ParserState::Processing
@@ -340,8 +343,7 @@ impl<T: Seek + Read> MCDParser<T> {
                 b"Panorama" => {
                     let panorama = self.current_panorama.take().unwrap();
                     let panorama_id = panorama.id.as_ref().unwrap();
-                    self.panoramas
-                        .insert(panorama_id.clone(), panorama.into());
+                    self.panoramas.insert(*panorama_id, panorama.into());
 
                     self.state = ParserState::Processing
                 }
@@ -357,7 +359,7 @@ impl<T: Seek + Read> MCDParser<T> {
 
                     //self.current_mcd.as_mut().unwrap().acquisition_order.push(acquisition_id.clone());
                     self.acquisitions
-                        .insert(acquisition_id.clone(), acquisition.into());
+                        .insert(*acquisition_id, acquisition.into());
 
                     self.state = ParserState::Processing
                 }
@@ -369,8 +371,7 @@ impl<T: Seek + Read> MCDParser<T> {
                 }
                 b"ROIPoint" => {
                     let roi_point = self.current_roi_point.take().unwrap();
-                    self.roi_points
-                        .push(roi_point);
+                    self.roi_points.push(roi_point);
 
                     self.state = ParserState::Processing
                 }
@@ -391,11 +392,13 @@ impl<T: Seek + Read> MCDParser<T> {
             Event::Text(e) => {
                 match self.state {
                     ParserState::ProcessingSlide => {
-                        let ref mut slide = self.current_slide.as_mut().unwrap();
+                        let slide = self.current_slide.as_mut().unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
-                                let id = std::str::from_utf8(&e.unescaped().unwrap()).unwrap().to_owned();
+                                let id = std::str::from_utf8(&e.unescaped().unwrap())
+                                    .unwrap()
+                                    .to_owned();
                                 let id = id.parse().unwrap();
 
                                 slide.id = Some(id)
@@ -481,27 +484,27 @@ impl<T: Seek + Read> MCDParser<T> {
                     }
 
                     ParserState::ProcessingPanorama => {
-                        let ref mut panorama = self.current_panorama.as_mut().unwrap();
+                        let panorama = self.current_panorama.as_mut().unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
                                 let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                .unwrap()
-                                .to_owned();
+                                    .unwrap()
+                                    .to_owned();
 
                                 panorama.id = Some(id.parse().unwrap())
                             }
                             ParserState::ProcessingSlideID => {
                                 let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                .unwrap()
-                                .to_owned();
+                                    .unwrap()
+                                    .to_owned();
 
                                 panorama.slide_id = Some(id.parse().unwrap())
                             }
                             ParserState::ProcessingDescription => {
                                 let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                .unwrap()
-                                .to_owned();
+                                    .unwrap()
+                                    .to_owned();
 
                                 panorama.description = Some(id.parse().unwrap())
                             }
@@ -604,7 +607,8 @@ impl<T: Seek + Read> MCDParser<T> {
                             ParserState::ProcessingImageFormat => {
                                 match std::str::from_utf8(&e.unescaped().unwrap()).as_ref() {
                                     Ok(&"PNG") => panorama.image_format = Some(ImageFormat::Png),
-                                    _ => {}
+                                    Ok(_) => todo!(),
+                                    Err(_) => todo!(),
                                 }
                             }
                             ParserState::ProcessingPixelScaleCoef => {
@@ -628,7 +632,7 @@ impl<T: Seek + Read> MCDParser<T> {
                     }
 
                     ParserState::ProcessingAcquisitionChannel => {
-                        let ref mut acquisition_channel =
+                        let acquisition_channel =
                             self.current_acquisition_channel.as_mut().unwrap();
                         let unprocessed_text = &e.unescaped().unwrap();
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
@@ -662,12 +666,14 @@ impl<T: Seek + Read> MCDParser<T> {
                     }
 
                     ParserState::ProcessingAcquisition => {
-                        let ref mut acquisition = self.current_acquisition.as_mut().unwrap();
+                        let acquisition = self.current_acquisition.as_mut().unwrap();
                         let unprocessed_text = &e.unescaped().unwrap();
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => acquisition.id = Some(text.parse().unwrap()),
+                            ParserState::ProcessingID => {
+                                acquisition.id = Some(text.parse().unwrap())
+                            }
                             ParserState::ProcessingDescription => {
                                 acquisition.description = Some(text.to_owned())
                             }
@@ -740,7 +746,7 @@ impl<T: Seek + Read> MCDParser<T> {
                             ParserState::ProcessingMovementType => {
                                 acquisition.movement_type = Some(text.to_owned())
                             }
-                            ParserState::ProcessingSegmentDataFormat => match &text as &str {
+                            ParserState::ProcessingSegmentDataFormat => match text {
                                 "Float" => {
                                     acquisition.segment_data_format = Some(DataFormat::Float)
                                 }
@@ -779,21 +785,24 @@ impl<T: Seek + Read> MCDParser<T> {
                     }
 
                     ParserState::ProcessingAcquisitionROI => {
-                        let ref mut acquisition_roi =
-                            self.current_acquisition_roi.as_mut().unwrap();
+                        let acquisition_roi = self.current_acquisition_roi.as_mut().unwrap();
                         let unprocessed_text = &e.unescaped().unwrap();
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => acquisition_roi.id = Some(text.parse().unwrap()),
+                            ParserState::ProcessingID => {
+                                acquisition_roi.id = Some(text.parse().unwrap())
+                            }
                             ParserState::ProcessingPanoramaID => {
                                 acquisition_roi.panorama_id = Some(text.parse().unwrap())
                             }
-                            ParserState::ProcessingROIType => match &text as &str {
+                            ParserState::ProcessingROIType => match text {
                                 "Acquisition" => {
                                     acquisition_roi.roi_type = Some(ROIType::Acquisition)
                                 }
-                                _ => {}
+                                _ => {
+                                    todo!()
+                                }
                             },
                             ParserState::Processing => {}
                             _ => {
@@ -808,7 +817,7 @@ impl<T: Seek + Read> MCDParser<T> {
                     }
 
                     ParserState::ProcessingROIPoint => {
-                        let ref mut roi_point = self.current_roi_point.as_mut().unwrap();
+                        let roi_point = self.current_roi_point.as_mut().unwrap();
                         let unprocessed_text = &e.unescaped().unwrap();
                         let text = std::str::from_utf8(unprocessed_text).unwrap();
 

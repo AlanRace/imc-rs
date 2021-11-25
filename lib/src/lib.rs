@@ -16,10 +16,10 @@ use transform::AffineTransform;
 
 use std::convert::TryInto;
 
-use std::io::Cursor;
-use image::io::Reader as ImageReader;
 use image::imageops::FilterType;
-use image::{ImageFormat, RgbImage, RgbaImage, DynamicImage};
+use image::io::Reader as ImageReader;
+use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
+use std::io::Cursor;
 
 const BUF_SIZE: usize = 4096;
 
@@ -109,11 +109,11 @@ impl<T: Seek + Read> MCD<T> {
     pub fn slide_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.slides.len());
 
-        for (id, _panorama) in &self.slides {
+        for id in self.slides.keys() {
             ids.push(*id);
         }
 
-        ids.sort();
+        ids.sort_unstable();
 
         ids
     }
@@ -126,7 +126,10 @@ impl<T: Seek + Read> MCD<T> {
         let mut slides = Vec::new();
 
         for id in self.slide_ids() {
-            slides.push(self.slide(id).expect("Should only be finding slides that exist"));
+            slides.push(
+                self.slide(id)
+                    .expect("Should only be finding slides that exist"),
+            );
         }
 
         slides
@@ -136,7 +139,7 @@ impl<T: Seek + Read> MCD<T> {
         let mut channels = HashMap::new();
 
         // This should be unnecessary - hopefully there is only one set of channels per dataset?
-        for (_, slide) in &self.slides {
+        for slide in self.slides.values() {
             for panorama in slide.panoramas() {
                 for acquisition in panorama.acquisitions() {
                     for channel in acquisition.channels() {
@@ -374,11 +377,7 @@ impl<T: Seek + Read> Slide<T> {
             .expect("Should have copied the reader across");
         let reader = mutex.lock().unwrap();
 
-        image_data(
-            reader,
-            self.image_start_offset,
-            self.image_end_offset,
-        )
+        image_data(reader, self.image_start_offset, self.image_end_offset)
     }
 
     fn dynamic_image(&self) -> DynamicImage {
@@ -390,7 +389,7 @@ impl<T: Seek + Read> Slide<T> {
     pub fn image(&self) -> RgbImage {
         match self.dynamic_image() {
             DynamicImage::ImageRgb8(rgb8) => rgb8,
-            _ => panic!("Unexpected DynamicImage type")
+            _ => panic!("Unexpected DynamicImage type"),
         }
     }
 
@@ -417,15 +416,16 @@ impl<T: Seek + Read> Slide<T> {
 
         println!("Saved !");
 
-        let mut resized_image = slide_image.resize_exact(7500, 2500, FilterType::Nearest).to_rgba8();
+        let mut resized_image = slide_image
+            .resize_exact(width, width / 3, FilterType::Nearest)
+            .to_rgba8();
         println!("Resized !");
 
         for panorama in self.panoramas() {
-
             let panorama_image = panorama.image();
 
             //let panorama_image = panorama_image.to_rgba8();
-            
+
             let bounding_box = panorama.slide_bounding_box();
 
             let transform = panorama.to_slide_transform();
@@ -438,23 +438,27 @@ impl<T: Seek + Read> Slide<T> {
                     let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
 
                     let pixel = *panorama_image.get_pixel(x, y);
-                    
-                    resized_image.put_pixel((new_point[0] / 10.0).round() as u32 , ((self.height_um - new_point[1]) / 10.0).round() as u32, pixel);
+
+                    resized_image.put_pixel(
+                        (new_point[0] / 10.0).round() as u32,
+                        ((self.height_um - new_point[1]) / 10.0).round() as u32,
+                        pixel,
+                    );
                 }
             }
         }
-        
+
         resized_image
     }
 
     pub fn panorama_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.panoramas.len());
 
-        for (id, _panorama) in &self.panoramas {
+        for id in self.panoramas.keys() {
             ids.push(*id);
         }
 
-        ids.sort();
+        ids.sort_unstable();
 
         ids
     }
@@ -644,15 +648,39 @@ impl<T: Seek + Read> Panorama<T> {
     pub fn image(&self) -> RgbaImage {
         match self.dynamic_image() {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
-            _ => panic!("Unexpected DynamicImage type")
+            _ => panic!("Unexpected DynamicImage type"),
         }
     }
 
     pub fn slide_bounding_box(&self) -> BoundingBox {
-        let min_x = f64::min(self.slide_x1_pos_um, f64::min(self.slide_x2_pos_um, f64::min(self.slide_x3_pos_um, self.slide_x4_pos_um)));
-        let min_y = f64::min(self.slide_y1_pos_um, f64::min(self.slide_y2_pos_um, f64::min(self.slide_y3_pos_um, self.slide_y4_pos_um)));
-        let max_x = f64::max(self.slide_x1_pos_um, f64::max(self.slide_x2_pos_um, f64::max(self.slide_x3_pos_um, self.slide_x4_pos_um)));
-        let max_y = f64::max(self.slide_y1_pos_um, f64::max(self.slide_y2_pos_um, f64::max(self.slide_y3_pos_um, self.slide_y4_pos_um)));
+        let min_x = f64::min(
+            self.slide_x1_pos_um,
+            f64::min(
+                self.slide_x2_pos_um,
+                f64::min(self.slide_x3_pos_um, self.slide_x4_pos_um),
+            ),
+        );
+        let min_y = f64::min(
+            self.slide_y1_pos_um,
+            f64::min(
+                self.slide_y2_pos_um,
+                f64::min(self.slide_y3_pos_um, self.slide_y4_pos_um),
+            ),
+        );
+        let max_x = f64::max(
+            self.slide_x1_pos_um,
+            f64::max(
+                self.slide_x2_pos_um,
+                f64::max(self.slide_x3_pos_um, self.slide_x4_pos_um),
+            ),
+        );
+        let max_y = f64::max(
+            self.slide_y1_pos_um,
+            f64::max(
+                self.slide_y2_pos_um,
+                f64::max(self.slide_y3_pos_um, self.slide_y4_pos_um),
+            ),
+        );
 
         BoundingBox {
             min_x,
@@ -665,11 +693,11 @@ impl<T: Seek + Read> Panorama<T> {
     pub fn acquisition_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.acquisitions.len());
 
-        for (id, _acquisition) in &self.acquisitions {
+        for id in self.acquisitions.keys() {
             ids.push(*id);
         }
 
-        ids.sort();
+        ids.sort_unstable();
 
         ids
     }
@@ -704,7 +732,10 @@ impl<T: Seek + Read> Panorama<T> {
 
         fixed_points.push(Vector2::new(0.0, 0.0));
         fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
-        fixed_points.push(Vector2::new(self.pixel_width as f64, self.pixel_height as f64));
+        fixed_points.push(Vector2::new(
+            self.pixel_width as f64,
+            self.pixel_height as f64,
+        ));
         //fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
 
         AffineTransform::from_points(moving_points, fixed_points)
@@ -957,7 +988,6 @@ impl<T: Read + Seek> Acquisition<T> {
         }
     }
 
-    
     pub fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
@@ -975,21 +1005,24 @@ impl<T: Read + Seek> Acquisition<T> {
     }
 
     pub fn before_ablation_image(&self) -> RgbaImage {
-        match self.dynamic_image(self.before_ablation_image_start_offset,
-            self.before_ablation_image_end_offset) {
+        match self.dynamic_image(
+            self.before_ablation_image_start_offset,
+            self.before_ablation_image_end_offset,
+        ) {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
-            _ => panic!("Unexpected DynamicImage type")
+            _ => panic!("Unexpected DynamicImage type"),
         }
     }
 
     pub fn after_ablation_image(&self) -> RgbaImage {
-        match self.dynamic_image(self.after_ablation_image_start_offset,
-            self.after_ablation_image_end_offset) {
+        match self.dynamic_image(
+            self.after_ablation_image_start_offset,
+            self.after_ablation_image_end_offset,
+        ) {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
-            _ => panic!("Unexpected DynamicImage type")
+            _ => panic!("Unexpected DynamicImage type"),
         }
     }
-
 
     pub fn channels(&self) -> &Vec<AcquisitionChannel> {
         &self.channels
@@ -1166,17 +1199,14 @@ mod tests {
     use std::fs::File;
     use std::time::Instant;
 
-    use crate::transform::AffineTransform;
-    use nalgebra::Vector3;
-
-    use std::io::{BufReader};
-
+    use std::io::BufReader;
 
     #[test]
-    fn it_works() {
+    fn it_works() -> std::io::Result<()> {
         let start = Instant::now();
-        let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
-        let filename = "/home/alan/Documents/Work/Nicole/Salmonella/2019-10-25_Salmonella_final_VS+WT.mcd";
+        //let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
+        let filename =
+            "/home/alan/Documents/Nicole/Salmonella/2019-10-25_Salmonella_final_VS+WT.mcd";
 
         let duration = start.elapsed();
 
@@ -1223,55 +1253,76 @@ mod tests {
         //std::fs::write("slide.jpeg", slide.get_image().unwrap())
         //    .expect("Unable to write file");
 
-        
-            
-            /*
+        /*
 
-            let offset_x = (bounding_box.min_x / 10.0).round() as u32;
-            let offset_y = ((25000.0 - bounding_box.min_y - bounding_box.height) / 10.0).round() as u32;
-            let width = (bounding_box.width / 10.0).round() as u32;
-            let height = (bounding_box.height / 10.0).round() as u32;
-            
-            let panorama_image = panorama_image.resize_exact(width, height, FilterType::Nearest).to_rgb8();
+        let offset_x = (bounding_box.min_x / 10.0).round() as u32;
+        let offset_y = ((25000.0 - bounding_box.min_y - bounding_box.height) / 10.0).round() as u32;
+        let width = (bounding_box.width / 10.0).round() as u32;
+        let height = (bounding_box.height / 10.0).round() as u32;
 
-            if offset_x + width > 7500 || offset_y + height > 2500 {
-                continue;
+        let panorama_image = panorama_image.resize_exact(width, height, FilterType::Nearest).to_rgb8();
+
+        if offset_x + width > 7500 || offset_y + height > 2500 {
+            continue;
+        }
+
+        for y in 0..height {
+            for x in 0..width {
+                resized_image.put_pixel(offset_x + x, offset_y + y, *panorama_image.get_pixel(x, y));
             }
+        }*/
 
-            for y in 0..height {
-                for x in 0..width {
-                    resized_image.put_pixel(offset_x + x, offset_y + y, *panorama_image.get_pixel(x, y));
-                }
-            }*/
-            
-            //panorama_image.resize_exact()
+        //panorama_image.resize_exact()
 
-            //let transform = panorama.to_slide_transform();
+        //let transform = panorama.to_slide_transform();
 
-            let output_location = "/home/alan/Documents/Work/Nicole/Salmonella/";
-            let path = std::path::Path::new(output_location);
+        let output_location = "/home/alan/Documents/Nicole/Salmonella/";
+        let path = std::path::Path::new(output_location);
 
-            for panorama in slide.panoramas() {
-                let panorama_image = panorama.image();
-                panorama_image.save(format!("{}.png", panorama.description())).unwrap();
+        for panorama in slide.panoramas() {
+            let panorama_image = panorama.image();
+            panorama_image
+                .save(format!("{}.png", panorama.description()))
+                .unwrap();
 
-                for acquisition in panorama.acquisitions() {
-                    let acquisition_image = acquisition.before_ablation_image();
-                    acquisition_image.save(format!("{}_{}.png", panorama.description(), acquisition.description())).unwrap();
+            for acquisition in panorama.acquisitions() {
+                let acquisition_image = acquisition.before_ablation_image();
+                acquisition_image
+                    .save(format!(
+                        "{}_{}.png",
+                        panorama.description(),
+                        acquisition.description()
+                    ))
+                    .unwrap();
 
-                    let cur_path = path.join(format!("{}_{}.txt", panorama.description(), acquisition.description()));
-                    let mut f = File::create(cur_path).expect("Unable to create file");
+                let cur_path = path.join(format!(
+                    "{}_{}.txt",
+                    panorama.description(),
+                    acquisition.description()
+                ));
+                let mut f = File::create(cur_path).expect("Unable to create file");
 
-                    let transform = acquisition.to_slide_transform();
-                    let transform = transform.to_slide_matrix();
-                    writeln!(f, "{},{}", acquisition.width(), acquisition.height());
-                    writeln!(f, "{},{},{},{},{},{}", transform.m11, transform.m12, transform.m13, transform.m21, transform.m22, transform.m23);
-                }
+                let transform = acquisition.to_slide_transform();
+                let transform = transform.to_slide_matrix();
+                writeln!(f, "{},{}", acquisition.width(), acquisition.height())?;
+                writeln!(
+                    f,
+                    "{},{},{},{},{},{}",
+                    transform.m11,
+                    transform.m12,
+                    transform.m13,
+                    transform.m21,
+                    transform.m22,
+                    transform.m23
+                )?;
             }
+        }
+
+        Ok(())
 
         //let resized_image = slide.create_overview_image(7500);
         //resized_image.save("slide_resize.jpeg").unwrap();
-/*
+        /*
         let mut points = Vec::new();
         points.push(Vector2::new(20.0, 10.0));
         points.push(Vector2::new(20.0, 20.0));
