@@ -18,7 +18,7 @@ use std::convert::TryInto;
 
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
-use image::{DynamicImage, ImageFormat, Pixel, RgbImage, Rgba, RgbaImage};
+use image::{DynamicImage, ImageBuffer, ImageFormat, Pixel, RgbImage, Rgba, RgbaImage};
 use std::io::Cursor;
 
 const BUF_SIZE: usize = 4096;
@@ -458,12 +458,27 @@ impl<T: Seek + Read> Slide<T> {
 
                 let mut index = 0;
 
+                let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                    ImageBuffer::new(data.width as u32, data.height as u32);
+
                 for y in 0..data.height {
+                    if index >= data.valid_pixels {
+                        break;
+                    }
+
                     for x in 0..data.width {
+                        if index >= data.valid_pixels {
+                            break;
+                        }
+
                         let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
 
                         let g = ((data.data[index] / 100.0) * 255.0) as u8;
                         let g = g as f64 / 255.0;
+
+                        let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                        cur_pixel[1] = (g * 255.0) as u8;
+                        cur_pixel[3] = 255;
 
                         //let pixel = Rgba::from_channels(0, g, 0, g);
 
@@ -485,6 +500,10 @@ impl<T: Seek + Read> Slide<T> {
                         index += 1;
                     }
                 }
+
+                acq_image
+                    .save(format!("{}_Ir(191).png", acquisition.description()))
+                    .unwrap();
 
                 println!("Finished reading data");
             }
@@ -976,6 +995,7 @@ pub struct ChannelImage {
     width: i32,
     height: i32,
     range: (f32, f32),
+    valid_pixels: usize,
     data: Vec<f32>,
 }
 
@@ -1019,7 +1039,13 @@ impl<T: Read + Seek> Acquisition<T> {
 
         fixed_points.push(Vector2::new(0.0, 0.0));
         fixed_points.push(Vector2::new(self.max_x as f64, 0.0));
-        fixed_points.push(Vector2::new(0.0, self.max_y as f64));
+        //fixed_points.push(Vector2::new(0.0, self.max_y as f64));
+        fixed_points.push(Vector2::new(
+            0.0,
+            (self.roi_start_y_pos_um - self.roi_end_y_pos_um)
+                / self.ablation_distance_between_shots_y,
+        ));
+
         //fixed_points.push(Vector2::new(self.max_x as f64, self.max_y as f64));
 
         AffineTransform::from_points(moving_points, fixed_points)
@@ -1139,6 +1165,7 @@ impl<T: Read + Seek> Acquisition<T> {
             width: self.max_x,
             height: self.max_y,
             range: (min_value, max_value),
+            valid_pixels: num_spectra,
             data,
         }
     }
@@ -1421,7 +1448,7 @@ mod tests {
         for panorama in slide.panoramas() {
             let panorama_image = panorama.image();
             panorama_image
-                .save(format!("{}.png", panorama.description()))
+                .save(path.join(format!("{}.png", panorama.description())))
                 .unwrap();
 
             for acquisition in panorama.acquisitions() {
