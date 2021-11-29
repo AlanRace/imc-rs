@@ -11,3 +11,7 @@ quick-xml = "0.22.0"
 nalgebra = "0.25.0" # Higher versions run into bug with rust-analyzer
 num-traits = "0.2"
 image = "0.23"
+lz4_flex = { version = "0.9.0" }
+thiserror = "1.0"
+byteorder = "1"
+rand = "0.8.0"

@@ -1,15 +1,23 @@
-mod parser;
+mod convert;
+mod error;
+mod mcd;
 mod transform;
 
+use core::num;
 use std::fmt;
 
-use std::sync::{Arc, Mutex};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use std::collections::HashMap;
-use std::io::prelude::*;
 use std::io::SeekFrom;
+use std::io::{prelude::*, BufReader};
 
-use parser::{MCDParser, ParserState};
+use error::MCDError;
+use mcd::{MCDParser, ParserState};
 
 use nalgebra::Vector2;
 use transform::AffineTransform;
@@ -99,7 +107,14 @@ impl<T: Seek + Read> MCD<T> {
         &self.reader
     }*/
 
-    pub fn reader(&self) -> &Arc<Mutex<T>> {
+    pub(crate) fn dcm_file(&self) -> PathBuf {
+        let mut path = PathBuf::from(&self.location);
+        path.set_extension("dcm");
+
+        path
+    }
+
+    pub(crate) fn reader(&self) -> &Arc<Mutex<T>> {
         &self.reader
     }
 
@@ -130,6 +145,10 @@ impl<T: Seek + Read> MCD<T> {
         }
 
         slides
+    }
+
+    fn slides_mut(&mut self) -> &mut HashMap<u16, Slide<T>> {
+        &mut self.slides
     }
 
     pub fn channels(&self) -> Vec<&AcquisitionChannel> {
@@ -264,7 +283,15 @@ impl<T: Seek + Read> MCD<T> {
             buf.clear();
         }
 
-        parser.mcd()
+        let mut mcd = parser.mcd();
+
+        if std::fs::metadata(mcd.dcm_file()).is_err() {
+            convert::convert(&mcd).unwrap();
+        }
+
+        convert::open(&mut mcd).unwrap();
+
+        mcd
     }
     /*pub(crate) fn add_acquisition_channel(&mut self, channel: AcquisitionChannel) {
             let acquisition_id = channel.acquisition_id.expect("Must have an AcquisitionID or won't know which Acquisition the AcquisitionChannel belongs to");
@@ -542,6 +569,10 @@ impl<T: Seek + Read> Slide<T> {
 
         panoramas
     }
+
+    fn panoramas_mut(&mut self) -> &mut HashMap<u16, Panorama<T>> {
+        &mut self.panoramas
+    }
 }
 
 impl<T: Seek + Read> Print for Slide<T> {
@@ -767,6 +798,10 @@ impl<T: Seek + Read> Panorama<T> {
         self.acquisitions.get(&id)
     }
 
+    fn acquisition_mut(&mut self, id: u16) -> Option<&mut Acquisition<T>> {
+        self.acquisitions.get_mut(&id)
+    }
+
     // Get acquisitions ordered by ID
     pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
         let mut acquisitions = Vec::new();
@@ -780,6 +815,10 @@ impl<T: Seek + Read> Panorama<T> {
         }
 
         acquisitions
+    }
+
+    fn acquisitions_mut(&mut self) -> &mut HashMap<u16, Acquisition<T>> {
+        &mut self.acquisitions
     }
 
     pub fn to_slide_transform(&self) -> AffineTransform<f64> {
@@ -946,8 +985,17 @@ enum DataFormat {
 }
 
 #[derive(Debug)]
+struct DataLocation {
+    reader: Arc<Mutex<BufReader<File>>>,
+
+    offsets: Vec<u64>,
+    sizes: Vec<u64>,
+}
+
+#[derive(Debug)]
 pub struct Acquisition<T: Read + Seek> {
     reader: Option<Arc<Mutex<T>>>,
+    dcm_location: Option<DataLocation>,
 
     id: u16,
     description: String,
@@ -997,6 +1045,53 @@ pub struct ChannelImage {
     range: (f32, f32),
     valid_pixels: usize,
     data: Vec<f32>,
+}
+
+pub struct SpectrumIterator<'a, T: Read + Seek> {
+    acquisition: &'a Acquisition<T>,
+    reader: MutexGuard<'a, T>,
+    buffer: Vec<u8>,
+}
+
+impl<'a, T: Read + Seek> SpectrumIterator<'a, T> {
+    fn new(acquisition: &'a Acquisition<T>) -> Self {
+        let mut reader = acquisition.reader.as_ref().unwrap().lock().unwrap();
+
+        let offset = acquisition.data_start_offset as u64;
+
+        // TODO: Handle this properly without unwrapping
+        reader.seek(SeekFrom::Start(offset)).unwrap();
+
+        SpectrumIterator {
+            acquisition,
+            reader,
+            buffer: vec![0u8; 4 * acquisition.channels.len()],
+        }
+    }
+}
+
+impl<'a, T: Read + Seek> Iterator for SpectrumIterator<'a, T> {
+    type Item = Vec<f32>;
+
+    fn next(&mut self) -> Option<Vec<f32>> {
+        let cur_pos = self.reader.seek(SeekFrom::Current(0)).unwrap();
+        if cur_pos >= self.acquisition.data_end_offset as u64 {
+            None
+        } else {
+            let mut spectrum = Vec::with_capacity(self.acquisition.channels.len());
+
+            self.reader.read_exact(&mut self.buffer).unwrap();
+            let mut buffer = Cursor::new(&mut self.buffer);
+
+            for _i in 0..self.acquisition.channels.len() {
+                let float = buffer.read_f32::<LittleEndian>().unwrap();
+
+                spectrum.push(float);
+            }
+
+            Some(spectrum)
+        }
+    }
 }
 
 impl<T: Read + Seek> Acquisition<T> {
@@ -1123,49 +1218,104 @@ impl<T: Read + Seek> Acquisition<T> {
         expected_size == measured_size
     }
 
-    pub fn channel_data(&self, identifier: ChannelIdentifier) -> ChannelImage {
-        let channel = self.channel(identifier).unwrap();
+    pub fn spectra(&self) -> SpectrumIterator<T> {
+        SpectrumIterator::new(self)
+    }
 
-        let measured_size: usize = self.data_end_offset as usize - self.data_start_offset as usize;
-        let spectrum_size: u64 = self.channels().len() as u64 * self.value_bytes as u64;
-        let num_spectra = measured_size / spectrum_size as usize;
+    pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>, MCDError> {
+        let index = y * self.max_x as usize + x;
 
-        let mut data = vec![0.0f32; num_spectra];
+        if index >= self.num_spectra() {
+            return Err(MCDError::InvalidIndex {
+                index,
+                num_spectra: self.num_spectra(),
+            });
+        }
 
-        let offset =
-            self.data_start_offset as u64 + channel.order_number as u64 * self.value_bytes as u64;
+        let offset = self.data_start_offset as u64
+            + (index * self.channels.len() * self.value_bytes as usize) as u64;
 
+        let mut spectrum = Vec::with_capacity(self.channels.len());
         let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
-        // TODO: Currently this only works for f32
-        let mut buf = [0; 4];
-
-        let mut min_value = f32::MAX;
-        let mut max_value = f32::MIN;
 
         // TODO: Handle this properly without unwrapping
         reader.seek(SeekFrom::Start(offset)).unwrap();
-        for data_point in data.iter_mut() {
+
+        let mut buffer = [0u8; 4];
+        for _i in 0..self.channels.len() {
+            reader.read_exact(&mut buffer)?;
+            let float = f32::from_le_bytes(buffer);
+            spectrum.push(float);
+        }
+
+        Ok(spectrum)
+    }
+
+    #[inline]
+    pub fn spectrum_size(&self) -> usize {
+        self.channels().len() * self.value_bytes as usize
+    }
+
+    #[inline]
+    pub fn num_spectra(&self) -> usize {
+        let measured_size: usize = self.data_end_offset as usize - self.data_start_offset as usize;
+
+        measured_size / self.spectrum_size()
+    }
+
+    pub fn channel_data(&self, identifier: ChannelIdentifier) -> ChannelImage {
+        let channel = self.channel(identifier).unwrap();
+        let mut data = vec![0.0f32; self.num_spectra()];
+        let mut min_value = f32::MAX;
+        let mut max_value = f32::MIN;
+
+        if let Some(data_location) = &self.dcm_location {
+            let mut reader = data_location.reader.lock().unwrap();
+            let offset = data_location.offsets[channel.order_number as usize];
+            let mut buf = vec![0; data_location.sizes[channel.order_number as usize] as usize];
+
+            reader.seek(SeekFrom::Start(offset)).unwrap();
             reader.read_exact(&mut buf).unwrap();
 
-            *data_point = f32::from_le_bytes(buf);
+            let decompressed_data = lz4_flex::decompress(&buf, self.num_spectra() * 4).unwrap();
+            let mut decompressed_data = Cursor::new(decompressed_data);
 
-            if *data_point > min_value {
-                min_value = *data_point;
-            }
-            if *data_point < max_value {
-                max_value = *data_point;
-            }
-
-            reader
-                .seek(SeekFrom::Current(spectrum_size as i64 - 4))
+            decompressed_data
+                .read_f32_into::<LittleEndian>(&mut data)
                 .unwrap();
+        } else {
+            let offset = self.data_start_offset as u64
+                + channel.order_number as u64 * self.value_bytes as u64;
+
+            let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
+            // TODO: Currently this only works for f32
+            let mut buf = [0; 4];
+
+            // TODO: Handle this properly without unwrapping
+            reader.seek(SeekFrom::Start(offset)).unwrap();
+            for data_point in data.iter_mut() {
+                reader.read_exact(&mut buf).unwrap();
+
+                *data_point = f32::from_le_bytes(buf);
+
+                if *data_point > min_value {
+                    min_value = *data_point;
+                }
+                if *data_point < max_value {
+                    max_value = *data_point;
+                }
+
+                reader
+                    .seek(SeekFrom::Current(self.spectrum_size() as i64 - 4))
+                    .unwrap();
+            }
         }
 
         ChannelImage {
             width: self.max_x,
             height: self.max_y,
             range: (min_value, max_value),
-            valid_pixels: num_spectra,
+            valid_pixels: self.num_spectra(),
             data,
         }
     }
@@ -1372,6 +1522,7 @@ mod tests {
         let start = Instant::now();
         //let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
         let filename =
+        //    "/media/alan/Seagate Portable Drive/AZ/Gemcitabine/20181002_IMC_Gemcitabine_testpanel.mcd";
             "/home/alan/Documents/Nicole/Salmonella/2019-10-25_Salmonella_final_VS+WT.mcd";
 
         let duration = start.elapsed();
@@ -1381,7 +1532,7 @@ mod tests {
         //}
 
         let file = BufReader::new(File::open(filename).unwrap());
-        let mcd = MCD::parse(file, filename);
+        let mut mcd = MCD::parse(file, filename);
 
         //println!("{:?}", mcd.slide);
         //println!("{:?}", mcd.panoramas);
@@ -1416,6 +1567,12 @@ mod tests {
 
         let slide = mcd.slide(1).unwrap();
 
+        //convert::convert(&mcd)?;
+
+        //println!("{:?}", mcd);
+
+        //return Ok(());
+
         //std::fs::write("slide.jpeg", slide.get_image().unwrap())
         //    .expect("Unable to write file");
 
@@ -1445,7 +1602,7 @@ mod tests {
         let output_location = "/home/alan/Documents/Nicole/Salmonella/";
         let path = std::path::Path::new(output_location);
 
-        for panorama in slide.panoramas() {
+        /*for panorama in slide.panoramas() {
             let panorama_image = panorama.image();
             panorama_image
                 .save(path.join(format!("{}.png", panorama.description())))
@@ -1482,12 +1639,13 @@ mod tests {
                     transform.m23
                 )?;
             }
-        }
+        }*/
 
         let resized_image = slide.create_overview_image(15000);
         resized_image
             .save(path.join("slide_overview.jpeg"))
             .unwrap();
+
         /*
         let mut points = Vec::new();
         points.push(Vector2::new(20.0, 10.0));

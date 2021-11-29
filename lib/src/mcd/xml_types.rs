@@ -1,6 +1,6 @@
-use super::{Acquisition, AcquisitionChannel, Slide, DataFormat, ImageFormat, Panorama};
+use super::{Acquisition, AcquisitionChannel, DataFormat, ImageFormat, Panorama, Slide};
 use std::collections::HashMap;
-use std::io::{Seek, Read};
+use std::io::{Read, Seek};
 
 #[derive(Debug)]
 pub(crate) enum ROIType {
@@ -81,7 +81,6 @@ impl From<AcquisitionChannelXML> for AcquisitionChannel {
     }
 }
 
-
 #[derive(Debug)]
 pub(crate) struct AcquisitionXML {
     pub(crate) id: Option<u16>,
@@ -106,7 +105,7 @@ pub(crate) struct AcquisitionXML {
     pub(crate) roi_start_y_pos_um: Option<f64>,
     pub(crate) roi_end_x_pos_um: Option<f64>,
     pub(crate) roi_end_y_pos_um: Option<f64>,
-    pub(crate)  movement_type: Option<String>,
+    pub(crate) movement_type: Option<String>,
     pub(crate) segment_data_format: Option<DataFormat>,
     pub(crate) value_bytes: Option<u8>,
     pub(crate) max_x: Option<i32>,
@@ -117,7 +116,6 @@ pub(crate) struct AcquisitionXML {
 }
 
 impl AcquisitionXML {
-
     pub fn new() -> AcquisitionXML {
         AcquisitionXML {
             id: None,
@@ -154,17 +152,21 @@ impl AcquisitionXML {
     }
 }
 
-
 impl<T: Seek + Read> From<AcquisitionXML> for Acquisition<T> {
     fn from(acquisition: AcquisitionXML) -> Self {
         Acquisition {
             reader: None,
+            dcm_location: None,
 
             id: acquisition.id.unwrap(),
             description: acquisition.description.unwrap(),
             ablation_power: acquisition.ablation_power.unwrap(),
-            ablation_distance_between_shots_x: acquisition.ablation_distance_between_shots_x.unwrap(),
-            ablation_distance_between_shots_y: acquisition.ablation_distance_between_shots_y.unwrap(),
+            ablation_distance_between_shots_x: acquisition
+                .ablation_distance_between_shots_x
+                .unwrap(),
+            ablation_distance_between_shots_y: acquisition
+                .ablation_distance_between_shots_y
+                .unwrap(),
             ablation_frequency: acquisition.ablation_frequency.unwrap(),
             acquisition_roi_id: acquisition.acquisition_roi_id.unwrap(),
             order_number: acquisition.order_number.unwrap(),
@@ -174,9 +176,13 @@ impl<T: Seek + Read> From<AcquisitionXML> for Acquisition<T> {
             data_end_offset: acquisition.data_end_offset.unwrap(),
             start_timestamp: acquisition.start_timestamp.unwrap(),
             end_timestamp: acquisition.end_timestamp.unwrap(),
-            after_ablation_image_start_offset: acquisition.after_ablation_image_start_offset.unwrap(),
+            after_ablation_image_start_offset: acquisition
+                .after_ablation_image_start_offset
+                .unwrap(),
             after_ablation_image_end_offset: acquisition.after_ablation_image_end_offset.unwrap(),
-            before_ablation_image_start_offset: acquisition.before_ablation_image_start_offset.unwrap(),
+            before_ablation_image_start_offset: acquisition
+                .before_ablation_image_start_offset
+                .unwrap(),
             before_ablation_image_end_offset: acquisition.before_ablation_image_end_offset.unwrap(),
             roi_start_x_pos_um: acquisition.roi_start_x_pos_um.unwrap(),
             roi_start_y_pos_um: acquisition.roi_start_y_pos_um.unwrap(),
@@ -252,7 +258,6 @@ impl<T: Seek + Read> From<SlideXML> for Slide<T> {
     }
 }
 
-
 #[derive(Debug)]
 pub(crate) struct PanoramaXML {
     pub(crate) id: Option<u16>,
@@ -298,7 +303,6 @@ impl PanoramaXML {
         }
     }
 }
-
 
 impl<T: Seek + Read> From<PanoramaXML> for Panorama<T> {
     fn from(panorama: PanoramaXML) -> Self {
