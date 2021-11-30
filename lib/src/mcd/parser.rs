@@ -1,13 +1,31 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::TryInto, io::SeekFrom};
 
 use quick_xml::events::Event;
 
+use crate::acquisition::DataFormat;
+
 use super::{
     Acquisition, AcquisitionChannel, AcquisitionChannelXML, AcquisitionROI, AcquisitionXML,
-    DataFormat, ImageFormat, Panorama, PanoramaXML, ROIPoint, ROIType, SlideXML, MCD,
+    ImageFormat, Panorama, PanoramaXML, ROIPoint, ROIType, SlideXML, MCD,
 };
 
 use std::io::prelude::*;
+
+fn find_mcd_start(chunk: &[u8], chunk_size: usize) -> usize {
+    for start_index in 0..chunk_size {
+        if let Ok(_data) = std::str::from_utf8(&chunk[start_index..]) {
+            return start_index - 1;
+        }
+    }
+
+    0
+}
+
+fn u16_from_u8(a: &mut [u16], v: &[u8]) {
+    for i in 0..a.len() {
+        a[i] = (v[i * 2] as u16) | ((v[i * 2 + 1] as u16) << 8)
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum ParserState {
@@ -133,6 +151,55 @@ impl<T: Seek + Read> MCDParser<T> {
         }
     }
 
+    pub(crate) fn get_xml(&mut self) -> String {
+        let chunk_size: i64 = 1000;
+        let mut cur_offset: i64 = 0;
+
+        let mut buf_u8 = vec![0; chunk_size.try_into().unwrap()];
+
+        loop {
+            let mut reader = self.current_mcd.as_mut().unwrap().reader.lock().unwrap();
+
+            reader
+                .seek(SeekFrom::End(-cur_offset - chunk_size))
+                .unwrap();
+
+            reader.read_exact(&mut buf_u8).unwrap();
+
+            match std::str::from_utf8(&buf_u8) {
+                Ok(_data) => {}
+                Err(_error) => {
+                    // Found the final chunk, so find the start point
+                    let start_index = find_mcd_start(&buf_u8, chunk_size.try_into().unwrap());
+
+                    let total_size = cur_offset + chunk_size - (start_index as i64);
+                    buf_u8 = vec![0; total_size.try_into().unwrap()];
+
+                    reader.seek(SeekFrom::End(-total_size)).unwrap();
+                    reader.read_exact(&mut buf_u8).unwrap();
+
+                    break;
+                }
+            }
+
+            cur_offset += chunk_size;
+        }
+
+        let mut combined_xml = String::new();
+
+        let mut buf_u16: Vec<u16> = vec![0; buf_u8.len() / 2];
+        u16_from_u8(&mut buf_u16, &buf_u8);
+
+        match String::from_utf16(&buf_u16) {
+            Ok(data) => combined_xml.push_str(&data),
+            Err(error) => {
+                println!("{}", error)
+            }
+        }
+
+        combined_xml
+    }
+
     pub fn mcd(&mut self) -> MCD<T> {
         let mut mcd = self
             .current_mcd
@@ -145,9 +212,9 @@ impl<T: Seek + Read> MCDParser<T> {
         for channel in self.acquisition_channels.drain(0..) {
             let acquisition = self
                 .acquisitions
-                .get_mut(&channel.acquisition_id)
-                .unwrap_or_else(|| panic!("Missing AcquisitionID {}", channel.acquisition_id));
-            acquisition.channels.push(channel);
+                .get_mut(&channel.acquisition_id())
+                .unwrap_or_else(|| panic!("Missing AcquisitionID {}", channel.acquisition_id()));
+            acquisition.channels_mut().push(channel);
         }
 
         // Create map with Arc for sharing pointers with Panorama
@@ -172,19 +239,21 @@ impl<T: Seek + Read> MCDParser<T> {
                 )
                 .expect("Should have Panorama with same ID as AcquisitionROI");
 
-            panorama.acquisitions.insert(acquisition.id, acquisition);
+            panorama
+                .acquisitions_mut()
+                .insert(acquisition.id(), acquisition);
         }
 
         for (id, mut panorama) in self.panoramas.drain() {
             //mcd.panoramas.insert(id, panorama);
-            let slide_id = panorama.slide_id;
+            let slide_id = panorama.slide_id();
 
             let slide = mcd
                 .slides
                 .get_mut(&slide_id)
                 .unwrap_or_else(|| panic!("Missing Slide with ID {}", slide_id));
             panorama.reader = Some(reader.clone());
-            slide.panoramas.insert(id, panorama);
+            slide.panoramas_mut().insert(id, panorama);
         }
 
         // Update the acquisitions

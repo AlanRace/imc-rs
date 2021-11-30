@@ -38,7 +38,7 @@ where
     direction: Direction,
 
     matrix: Matrix3<T>,
-    inv_matix: Option<Matrix3<T>>,
+    //    inv_matix: Option<Matrix3<T>>,
 }
 
 fn to_dmatrix<T>(points: Vec<Vector2<T>>) -> DMatrix<T>
@@ -102,7 +102,7 @@ where
         AffineTransform {
             direction: Direction::ToSlide,
             matrix,
-            inv_matix: None,
+            //            inv_matix: None,
         }
     }
 

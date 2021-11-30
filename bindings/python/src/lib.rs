@@ -11,12 +11,12 @@ use std::fs::File;
 use std::sync::Arc;
 
 #[pyclass]
-struct MCD {
+struct Mcd {
     mcd: Arc<imc_rs::MCD<std::fs::File>>,
 }
 
 #[pymethods]
-impl MCD {
+impl Mcd {
     #[staticmethod]
     pub fn parse(filename: &str) -> PyResult<Self> {
         let file = match File::open(filename) {
@@ -26,7 +26,19 @@ impl MCD {
 
         let mcd = imc_rs::MCD::parse(file, filename);
 
-        Ok(MCD { mcd: Arc::new(mcd) })
+        Ok(Mcd { mcd: Arc::new(mcd) })
+    }
+
+    #[staticmethod]
+    pub fn parse_with_dcm(filename: &str) -> PyResult<Self> {
+        let file = match File::open(filename) {
+            Ok(file) => file,
+            Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
+        };
+
+        let mcd = imc_rs::MCD::parse_with_dcm(file, filename);
+
+        Ok(Mcd { mcd: Arc::new(mcd) })
     }
 
     pub fn num_slides(&self) -> PyResult<usize> {
@@ -324,7 +336,7 @@ impl Acquisition {
 
 #[pymodule]
 fn pyimc(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<MCD>()?;
+    m.add_class::<Mcd>()?;
 
     Ok(())
 }

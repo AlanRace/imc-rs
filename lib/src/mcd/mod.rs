@@ -1,8 +1,10 @@
 mod parser;
 mod xml_types;
 
-use crate::{Acquisition, AcquisitionChannel, Slide, DataFormat, ImageFormat, Panorama, MCD};
-use xml_types::{AcquisitionXML, AcquisitionChannelXML, AcquisitionROI, ROIPoint, SlideXML, ROIType, PanoramaXML};
+use crate::{Acquisition, AcquisitionChannel, ImageFormat, Panorama, MCD};
+pub(crate) use xml_types::{
+    AcquisitionChannelXML, AcquisitionROI, AcquisitionXML, PanoramaXML, ROIPoint, ROIType, SlideXML,
+};
 
 pub use parser::MCDParser;
 pub use parser::ParserState;

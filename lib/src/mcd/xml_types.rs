@@ -1,5 +1,6 @@
-use super::{Acquisition, AcquisitionChannel, DataFormat, ImageFormat, Panorama, Slide};
-use std::collections::HashMap;
+use crate::acquisition::DataFormat;
+
+use super::{Acquisition, AcquisitionChannel, ImageFormat};
 use std::io::{Read, Seek};
 
 #[derive(Debug)]
@@ -71,13 +72,13 @@ impl AcquisitionChannelXML {
 
 impl From<AcquisitionChannelXML> for AcquisitionChannel {
     fn from(channel: AcquisitionChannelXML) -> Self {
-        AcquisitionChannel {
-            id: channel.id.expect("ID is required"),
-            channel_name: channel.channel_name.expect("ChannelName is required"),
-            order_number: channel.order_number.expect("OrderNumber is required"),
-            acquisition_id: channel.acquisition_id.expect("AcquisitionID is required"),
-            channel_label: channel.channel_label.expect("ChannelLabel is required"),
-        }
+        AcquisitionChannel::new(
+            channel.id.expect("ID is required"),
+            channel.acquisition_id.expect("AcquisitionID is required"),
+            channel.order_number.expect("OrderNumber is required"),
+            &channel.channel_name.expect("ChannelName is required"),
+            &channel.channel_label.expect("ChannelLabel is required"),
+        )
     }
 }
 
@@ -152,56 +153,6 @@ impl AcquisitionXML {
     }
 }
 
-impl<T: Seek + Read> From<AcquisitionXML> for Acquisition<T> {
-    fn from(acquisition: AcquisitionXML) -> Self {
-        Acquisition {
-            reader: None,
-            dcm_location: None,
-
-            id: acquisition.id.unwrap(),
-            description: acquisition.description.unwrap(),
-            ablation_power: acquisition.ablation_power.unwrap(),
-            ablation_distance_between_shots_x: acquisition
-                .ablation_distance_between_shots_x
-                .unwrap(),
-            ablation_distance_between_shots_y: acquisition
-                .ablation_distance_between_shots_y
-                .unwrap(),
-            ablation_frequency: acquisition.ablation_frequency.unwrap(),
-            acquisition_roi_id: acquisition.acquisition_roi_id.unwrap(),
-            order_number: acquisition.order_number.unwrap(),
-            signal_type: acquisition.signal_type.unwrap(),
-            dual_count_start: acquisition.dual_count_start.unwrap(),
-            data_start_offset: acquisition.data_start_offset.unwrap(),
-            data_end_offset: acquisition.data_end_offset.unwrap(),
-            start_timestamp: acquisition.start_timestamp.unwrap(),
-            end_timestamp: acquisition.end_timestamp.unwrap(),
-            after_ablation_image_start_offset: acquisition
-                .after_ablation_image_start_offset
-                .unwrap(),
-            after_ablation_image_end_offset: acquisition.after_ablation_image_end_offset.unwrap(),
-            before_ablation_image_start_offset: acquisition
-                .before_ablation_image_start_offset
-                .unwrap(),
-            before_ablation_image_end_offset: acquisition.before_ablation_image_end_offset.unwrap(),
-            roi_start_x_pos_um: acquisition.roi_start_x_pos_um.unwrap(),
-            roi_start_y_pos_um: acquisition.roi_start_y_pos_um.unwrap(),
-            roi_end_x_pos_um: acquisition.roi_end_x_pos_um.unwrap(),
-            roi_end_y_pos_um: acquisition.roi_end_y_pos_um.unwrap(),
-            movement_type: acquisition.movement_type.unwrap(),
-            segment_data_format: acquisition.segment_data_format.unwrap(),
-            value_bytes: acquisition.value_bytes.unwrap(),
-            max_x: acquisition.max_x.unwrap(),
-            max_y: acquisition.max_y.unwrap(),
-            plume_start: acquisition.plume_start.unwrap(),
-            plume_end: acquisition.plume_end.unwrap(),
-            template: acquisition.template.unwrap(),
-
-            channels: Vec::new(),
-        }
-    }
-}
-
 pub(crate) struct SlideXML {
     pub(crate) id: Option<u16>,
     pub(crate) uid: Option<String>,
@@ -232,28 +183,6 @@ impl SlideXML {
             image_end_offset: None,
             image_file: None,
             sw_version: None,
-        }
-    }
-}
-
-impl<T: Seek + Read> From<SlideXML> for Slide<T> {
-    fn from(slide: SlideXML) -> Self {
-        Slide {
-            reader: None,
-
-            id: slide.id.unwrap(),
-            uid: slide.uid.unwrap(),
-            description: slide.description.unwrap(),
-            filename: slide.filename.unwrap(),
-            slide_type: slide.slide_type.unwrap(),
-            width_um: slide.width_um.unwrap(),
-            height_um: slide.height_um.unwrap(),
-            image_start_offset: slide.image_start_offset.unwrap(),
-            image_end_offset: slide.image_end_offset.unwrap(),
-            image_file: slide.image_file.unwrap(),
-            sw_version: slide.sw_version.unwrap(),
-
-            panoramas: HashMap::new(),
         }
     }
 }
@@ -300,34 +229,6 @@ impl PanoramaXML {
             pixel_height: None,
             image_format: None,
             pixel_scale_coef: None,
-        }
-    }
-}
-
-impl<T: Seek + Read> From<PanoramaXML> for Panorama<T> {
-    fn from(panorama: PanoramaXML) -> Self {
-        Panorama {
-            reader: None,
-
-            id: panorama.id.unwrap(),
-            slide_id: panorama.slide_id.unwrap(),
-            description: panorama.description.unwrap(),
-            slide_x1_pos_um: panorama.slide_x1_pos_um.unwrap(),
-            slide_y1_pos_um: panorama.slide_y1_pos_um.unwrap(),
-            slide_x2_pos_um: panorama.slide_x2_pos_um.unwrap(),
-            slide_y2_pos_um: panorama.slide_y2_pos_um.unwrap(),
-            slide_x3_pos_um: panorama.slide_x3_pos_um.unwrap(),
-            slide_y3_pos_um: panorama.slide_y3_pos_um.unwrap(),
-            slide_x4_pos_um: panorama.slide_x4_pos_um.unwrap(),
-            slide_y4_pos_um: panorama.slide_y4_pos_um.unwrap(),
-            image_start_offset: panorama.image_start_offset.unwrap(),
-            image_end_offset: panorama.image_end_offset.unwrap(),
-            pixel_width: panorama.pixel_width.unwrap(),
-            pixel_height: panorama.pixel_height.unwrap(),
-            image_format: panorama.image_format.unwrap(),
-            pixel_scale_coef: panorama.pixel_scale_coef.unwrap(),
-
-            acquisitions: HashMap::new(),
         }
     }
 }

@@ -1,15 +1,14 @@
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fs::File,
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::prelude::*;
 
-use crate::{DataLocation, MCD};
+use crate::{acquisition::DataLocation, MCD};
 
 #[derive(Debug)]
 struct AcquisitionOffset {
@@ -155,7 +154,7 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
 
     for slide in mcd.slides() {
         for panorama in slide.panoramas() {
-            num_acquisitions += panorama.acquisitions.len();
+            num_acquisitions += panorama.acquisitions().len();
         }
     }
 
@@ -175,14 +174,7 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
 
                 for spectrum in acquisition.spectra() {
                     for (channel_index, &value) in spectrum.iter().enumerate() {
-                        let written_amount = files[channel_index].write_all(&value.to_le_bytes());
-
-                        match written_amount {
-                            Ok(written_amount) => {}
-                            Err(error) => {
-                                panic!("{:?}", error)
-                            }
-                        }
+                        files[channel_index].write_all(&value.to_le_bytes())?;
                     }
                 }
 
@@ -193,7 +185,7 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
 
                 let acquisition_index_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
                 acquisition_index.push((
-                    acquisition.id,
+                    acquisition.id(),
                     acquisition_index_location,
                     acquisition.channels().len() as u8,
                 ));
@@ -285,7 +277,7 @@ pub fn open<T: Read + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
     println!("Offset before starting to read: {}", cur_offset);
     let mut acquisition_offsets = HashMap::with_capacity(num_acquisitions as usize);
 
-    for i in 0..num_acquisitions {
+    for _i in 0..num_acquisitions {
         let id = dcm_file.read_u16::<LittleEndian>().expect("read id failed");
         let offset = dcm_file
             .read_u64::<LittleEndian>()
