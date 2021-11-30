@@ -291,7 +291,7 @@ impl<T: Read + Seek> Acquisition<T> {
         measured_size / self.spectrum_size()
     }
 
-    pub fn channel_data(&self, identifier: ChannelIdentifier) -> ChannelImage {
+    pub fn channel_data(&self, identifier: &ChannelIdentifier) -> ChannelImage {
         let channel = self.channel(identifier).unwrap();
         let mut data = vec![0.0f32; self.num_spectra()];
         let mut min_value = f32::MAX;
@@ -348,20 +348,20 @@ impl<T: Read + Seek> Acquisition<T> {
         }
     }
 
-    pub fn channel(&self, identifier: ChannelIdentifier) -> Option<&AcquisitionChannel> {
+    pub fn channel(&self, identifier: &ChannelIdentifier) -> Option<&AcquisitionChannel> {
         for channel in &self.channels {
             match identifier {
                 ChannelIdentifier::Order(order) => {
-                    if channel.order_number() == order {
+                    if channel.order_number() == *order {
                         return Some(channel);
                     }
                 }
-                ChannelIdentifier::Name(ref name) => {
+                ChannelIdentifier::Name(name) => {
                     if &channel.name() == name {
                         return Some(channel);
                     }
                 }
-                ChannelIdentifier::Label(ref label) => {
+                ChannelIdentifier::Label(label) => {
                     if &channel.label() == label {
                         return Some(channel);
                     }

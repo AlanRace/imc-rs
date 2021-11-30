@@ -14,6 +14,7 @@ use crate::{
     BoundingBox, Print,
 };
 
+/// Represents a panorama (containing one or more acquisitions)
 #[derive(Debug)]
 pub struct Panorama<T: Seek + Read> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
@@ -41,24 +42,32 @@ pub struct Panorama<T: Seek + Read> {
 }
 
 impl<T: Seek + Read> Panorama<T> {
+    /// Returns the panorama ID
     pub fn id(&self) -> u16 {
         self.id
     }
 
+    /// Returns the slide ID to which this panorama belongs
     pub fn slide_id(&self) -> u16 {
         self.slide_id
     }
 
+    /// Returns the given description for the panorama
     pub fn description(&self) -> &str {
         &self.description
     }
 
+    /// Return the dimensions in pixels (width, height) of the panorama image
     pub fn dimensions(&self) -> (i64, i64) {
         (self.pixel_width, self.pixel_height)
     }
 
     pub fn pixel_scale_coef(&self) -> f64 {
         self.pixel_scale_coef
+    }
+
+    pub fn image_format(&self) -> ImageFormat {
+        self.image_format
     }
 
     pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {

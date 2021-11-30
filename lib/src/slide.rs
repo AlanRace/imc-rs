@@ -14,6 +14,7 @@ use crate::{channel::ChannelIdentifier, images::read_image_data, Panorama, Print
 
 use crate::mcd::SlideXML;
 
+/// Represents a slide (contains multiple panoramas) in the *.mcd format
 #[derive(Debug)]
 pub struct Slide<T: Seek + Read> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
@@ -58,38 +59,47 @@ impl<T: Seek + Read> From<SlideXML> for Slide<T> {
 }
 
 impl<T: Seek + Read> Slide<T> {
+    /// Returns the slide ID
     pub fn id(&self) -> u16 {
         self.id
     }
 
+    /// Returns the slide UID
     pub fn uid(&self) -> &str {
         &self.uid
     }
 
+    /// Returns the description given to the slide
     pub fn description(&self) -> &str {
         &self.description
     }
 
+    /// Returns the width of the slide in μm
     pub fn width_in_um(&self) -> f64 {
         self.width_um
     }
 
+    /// Returns the height of the slide in μm
     pub fn height_in_um(&self) -> f64 {
         self.height_um
     }
 
+    /// Returns the *.mcd filename
     pub fn filename(&self) -> &str {
         &self.filename
     }
 
+    /// Returns the name of the image file used as a slide image
     pub fn image_file(&self) -> &str {
         &self.image_file
     }
 
+    /// Returns the version of the software used to produce this *.mcd file
     pub fn software_version(&self) -> &str {
         &self.sw_version
     }
 
+    /// Returns associated image data
     pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
@@ -106,6 +116,7 @@ impl<T: Seek + Read> Slide<T> {
         reader.decode().unwrap()
     }
 
+    /// Returns the image associated with the slide.
     pub fn image(&self) -> RgbImage {
         match self.dynamic_image() {
             DynamicImage::ImageRgb8(rgb8) => rgb8,
@@ -113,11 +124,20 @@ impl<T: Seek + Read> Slide<T> {
         }
     }
 
-    pub fn create_overview_image(&self, width: u32) -> RgbaImage {
+    /// Create an overview image of the slide scaled to the supplied width.
+    ///
+    /// This will scale the slide image to the supplied width, and overlay any panorama images acquired.
+    /// If an `channel_to_show` is supplied, then the selected channel (`ChannelIdentifier`) will be
+    /// overlayed with the data clipped at the specified maximum value (f32).
+    pub fn create_overview_image(
+        &self,
+        width: u32,
+        channel_to_show: Option<(&ChannelIdentifier, Option<f32>)>,
+    ) -> RgbaImage {
         let slide_image = self.dynamic_image();
 
         // Move into function to help debugging
-        match &slide_image {
+        /*match &slide_image {
             DynamicImage::ImageLuma8(_grey_image) => println!("ImageLuma8"),
             DynamicImage::ImageLumaA8(_grey_alpha_image) => println!("ImageLumaA8"),
             DynamicImage::ImageRgb8(_rgb8) => println!("ImageRgb8"),
@@ -134,12 +154,12 @@ impl<T: Seek + Read> Slide<T> {
 
         slide_image.save("slide.jpeg").unwrap();
 
-        println!("Saved !");
+        println!("Saved !");*/
 
         let mut resized_image = slide_image
             .resize_exact(width, width / 3, FilterType::Nearest)
             .to_rgba8();
-        println!("Resized !");
+        //println!("Resized !");
 
         let scale = 75000.0 / width as f64;
 
@@ -148,11 +168,11 @@ impl<T: Seek + Read> Slide<T> {
 
             //let panorama_image = panorama_image.to_rgba8();
 
-            let bounding_box = panorama.slide_bounding_box();
+            //let bounding_box = panorama.slide_bounding_box();
             let transform = panorama.to_slide_transform();
 
-            println!("[Panorama] Bounding box = {:?}", bounding_box);
-            println!("[Panorama] Transform = {:?}", transform);
+            //println!("[Panorama] Bounding box = {:?}", bounding_box);
+            //println!("[Panorama] Transform = {:?}", transform);
 
             for y in 0..panorama_image.height() {
                 for x in 0..panorama_image.width() {
@@ -168,71 +188,80 @@ impl<T: Seek + Read> Slide<T> {
                 }
             }
 
-            for acquisition in panorama.acquisitions() {
-                let bounding_box = acquisition.slide_bounding_box();
-                let transform = acquisition.to_slide_transform();
+            if let Some((identifier, max_value)) = channel_to_show {
+                for acquisition in panorama.acquisitions() {
+                    //println!("[Acquisition] Bounding box = {:?}", bounding_box);
+                    //println!("[Acquisition] Transform = {:?}", transform);
 
-                println!("[Acquisition] Bounding box = {:?}", bounding_box);
-                println!("[Acquisition] Transform = {:?}", transform);
+                    //let bounding_box = acquisition.slide_bounding_box();
+                    let transform = acquisition.to_slide_transform();
+                    let data = acquisition.channel_data(identifier);
 
-                let data = acquisition.channel_data(ChannelIdentifier::Name("Ir(191)".to_string()));
+                    let max_value = match max_value {
+                        Some(value) => value,
+                        None => data.range.1,
+                    };
 
-                let mut index = 0;
+                    let mut index = 0;
 
-                let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
-                    ImageBuffer::new(data.width as u32, data.height as u32);
+                    let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                        ImageBuffer::new(data.width as u32, data.height as u32);
 
-                for y in 0..data.height {
-                    if index >= data.valid_pixels {
-                        break;
-                    }
-
-                    for x in 0..data.width {
+                    for y in 0..data.height {
                         if index >= data.valid_pixels {
                             break;
                         }
 
-                        let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
+                        for x in 0..data.width {
+                            if index >= data.valid_pixels {
+                                break;
+                            }
 
-                        let g = ((data.data[index] / 100.0) * 255.0) as u8;
-                        let g = g as f64 / 255.0;
+                            let new_point =
+                                transform.transform_to_slide(x as f64, y as f64).unwrap();
 
-                        let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
-                        cur_pixel[1] = (g * 255.0) as u8;
-                        cur_pixel[3] = 255;
+                            let g = ((data.data[index] / max_value) * 255.0) as u8;
+                            let g = g as f64 / 255.0;
 
-                        //let pixel = Rgba::from_channels(0, g, 0, g);
+                            let cur_pixel =
+                                acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                            cur_pixel[1] = (g * 255.0) as u8;
+                            cur_pixel[3] = 255;
 
-                        let current_pixel = resized_image
-                            .get_pixel_mut(
-                                (new_point[0] / scale).round() as u32,
-                                ((self.height_um - new_point[1]) / scale).round() as u32,
-                            )
-                            .channels_mut();
+                            //let pixel = Rgba::from_channels(0, g, 0, g);
 
-                        let r = (current_pixel[0] as f64 / 255.0) * (1.0 - g);
-                        let g = g * g + (current_pixel[1] as f64 / 255.0) * (1.0 - g);
-                        let b = (current_pixel[2] as f64 / 255.0) * (1.0 - g);
+                            let current_pixel = resized_image
+                                .get_pixel_mut(
+                                    (new_point[0] / scale).round() as u32,
+                                    ((self.height_um - new_point[1]) / scale).round() as u32,
+                                )
+                                .channels_mut();
 
-                        current_pixel[0] = (r * 255.0) as u8;
-                        current_pixel[1] = (g * 255.0) as u8;
-                        current_pixel[2] = (b * 255.0) as u8;
+                            let r = (current_pixel[0] as f64 / 255.0) * (1.0 - g);
+                            let g = g * g + (current_pixel[1] as f64 / 255.0) * (1.0 - g);
+                            let b = (current_pixel[2] as f64 / 255.0) * (1.0 - g);
 
-                        index += 1;
+                            current_pixel[0] = (r * 255.0) as u8;
+                            current_pixel[1] = (g * 255.0) as u8;
+                            current_pixel[2] = (b * 255.0) as u8;
+
+                            index += 1;
+                        }
                     }
                 }
 
-                acq_image
-                    .save(format!("{}_Ir(191).png", acquisition.description()))
-                    .unwrap();
+                //                acq_image
+                //                    .save(format!("{}_Ir(191).png", acquisition.description()))
+                //                    .unwrap();
 
-                println!("Finished reading data");
+                //                println!("Finished reading data");
             }
         }
 
         resized_image
     }
 
+    /// Returns a vector of panorama ids sorted by ID number. This allocates a new vector on each call.
     pub fn panorama_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.panoramas.len());
 
@@ -245,11 +274,12 @@ impl<T: Seek + Read> Slide<T> {
         ids
     }
 
+    /// Returns panorama with a given ID number, or `None` if no such panorama exists
     pub fn panorama(&self, id: u16) -> Option<&Panorama<T>> {
         self.panoramas.get(&id)
     }
 
-    // Get panoramas ordered by ID
+    /// Returns a vector of references to panoramas sorted by ID number. This allocates a new vector on each call.
     pub fn panoramas(&self) -> Vec<&Panorama<T>> {
         let mut panoramas = Vec::new();
 

@@ -1,5 +1,7 @@
 //! python bindings for imc-rs, a library for accessing imaging mass cytometry data.
 
+use imc_rs::ChannelIdentifier;
+use numpy::PyArray2;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 
@@ -128,6 +130,30 @@ impl Mcd {
             id
         )))
     }
+
+    pub fn channels(&self) -> Vec<AcquisitionChannel> {
+        let mut channels = Vec::new();
+
+        for channel in self.mcd.channels() {
+            channels.push(AcquisitionChannel {
+                name: channel.name().to_string(),
+            })
+        }
+
+        channels
+    }
+}
+
+#[pyclass]
+struct AcquisitionChannel {
+    name: String,
+}
+
+#[pymethods]
+impl AcquisitionChannel {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 #[pyclass]
@@ -225,6 +251,33 @@ impl Slide {
         let array = Array::from_shape_vec((height, width, 3), raw_image).unwrap();
         array.into_pyarray(py)
     }
+
+    pub fn overview_image<'py>(
+        &self,
+        width: Option<u32>,
+        channel: Option<&'py AcquisitionChannel>,
+        max_value: Option<f32>,
+        py: Python<'py>,
+    ) -> &'py PyArray3<u8> {
+        let slide = self.get_slide();
+
+        let image = match channel {
+            Some(channel) => {
+                let identifier = ChannelIdentifier::Name(channel.name.clone());
+
+                slide.create_overview_image(width.unwrap_or(7500), Some((&identifier, max_value)))
+            }
+            None => slide.create_overview_image(width.unwrap_or(7500), None),
+        };
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let raw_image = image.into_raw();
+
+        //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
+
+        let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
+        array.into_pyarray(py)
+    }
 }
 
 #[pyclass]
@@ -267,6 +320,10 @@ impl Panorama {
 
         let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
         array.into_pyarray(py)
+    }
+
+    pub fn acquisition_ids(&self) -> PyResult<Vec<u16>> {
+        Ok(self.get_panorama().acquisition_ids())
     }
 }
 
@@ -330,6 +387,54 @@ impl Acquisition {
         //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
 
         let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
+        array.into_pyarray(py)
+    }
+
+    pub fn channels(&self) -> Vec<AcquisitionChannel> {
+        let acquisition = self.get_acquisition();
+
+        let mut channels = Vec::new();
+
+        for channel in acquisition.channels() {
+            channels.push(AcquisitionChannel {
+                name: channel.name().to_string(),
+            })
+        }
+
+        channels
+    }
+
+    pub fn channel_data<'py>(
+        &self,
+        channel: &'py AcquisitionChannel,
+        py: Python<'py>,
+    ) -> &'py PyArray2<f32> {
+        let acquisition = self.get_acquisition();
+
+        let identifier = ChannelIdentifier::Name(channel.name.clone());
+        let channel_data = acquisition.channel_data(&identifier);
+
+        let data = match !channel_data.is_complete() {
+            true => channel_data.intensities().to_vec(),
+            false => {
+                let mut data =
+                    vec![0.0; acquisition.height() as usize * acquisition.width() as usize];
+
+                let intensities = channel_data.intensities();
+
+                for (i, &intensity) in intensities.iter().enumerate() {
+                    data[i] = intensity;
+                }
+
+                data
+            }
+        };
+
+        let array = Array::from_shape_vec(
+            (acquisition.height() as usize, acquisition.width() as usize),
+            data,
+        )
+        .unwrap();
         array.into_pyarray(py)
     }
 }

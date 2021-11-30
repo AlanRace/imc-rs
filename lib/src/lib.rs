@@ -5,10 +5,12 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! extern crate imc_rs;
 //!
-//! use imc_rs::;
+//! use imc_rs::MCD;
+//! use std::io::BufReader;
+//! use std::fs::File;
 //!
 //! fn main() {
 //!     let filename = "/location/to/data.mcd";
@@ -31,32 +33,21 @@ mod panorama;
 mod slide;
 
 pub use self::acquisition::Acquisition;
+pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
 pub use self::slide::Slide;
 
 use std::fmt;
+use std::io::{Read, Seek};
 
-use byteorder::{LittleEndian, ReadBytesExt};
-use channel::{AcquisitionChannel, ChannelIdentifier};
-use images::read_image_data;
-
-use std::fs::File;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
-use std::io::SeekFrom;
-use std::io::{prelude::*, BufReader};
 
-use error::MCDError;
 use mcd::{MCDParser, ParserState};
 
-use nalgebra::Vector2;
-use transform::AffineTransform;
-
-use image::io::Reader as ImageReader;
-use image::{DynamicImage, ImageFormat, RgbaImage};
-use std::io::Cursor;
+use image::ImageFormat;
 
 const BUF_SIZE: usize = 4096;
 
@@ -280,20 +271,59 @@ pub enum ImageFormat {
     Png,
 }*/
 
+/// Represents a bounding rectangle
 #[derive(Debug)]
 pub struct BoundingBox {
+    /// Minimum x coordinate for the bounding rectangle
     pub min_x: f64,
+    /// Minimum y coordinate for the bounding rectangle
     pub min_y: f64,
+    /// Width of bounding rectangle
     pub width: f64,
+    /// Height of bounding rectangle
     pub height: f64,
 }
 
+/// Represents a channel image (stored as a vector of f32).
+/// If the run was stopped mid acquisition width*height != valid_pixels
 pub struct ChannelImage {
     width: i32,
     height: i32,
     range: (f32, f32),
     valid_pixels: usize,
     data: Vec<f32>,
+}
+
+impl ChannelImage {
+    /// Returns the width (in pixels) of the image
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    /// Returns the height (in pixels) of the image
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+
+    /// Returns a pair (min, max) of f32 describing the limits of the detected intensities in the image
+    pub fn intensity_range(&self) -> (f32, f32) {
+        self.range
+    }
+
+    /// Returns whether the data is complete (true) or whether the data acquisition aborted (false)
+    pub fn is_complete(&self) -> bool {
+        self.valid_pixels == (self.width * self.height) as usize
+    }
+
+    /// Returns the number of valid pixels in the image. If the run was aborted part way through `num_valid_pixels() < width() * height()`
+    pub fn num_valid_pixels(&self) -> usize {
+        self.valid_pixels
+    }
+
+    /// Returns the detected intensity values for this channel
+    pub fn intensities(&self) -> &[f32] {
+        &self.data
+    }
 }
 
 #[cfg(test)]
@@ -353,7 +383,7 @@ mod tests {
         std::fs::write("tmp.png", acquisition.get_after_ablation_image().unwrap())
             .expect("Unable to write file");*/
 
-        let slide = mcd.slide(1).unwrap();
+        let _slide = mcd.slide(1).unwrap();
 
         //convert::convert(&mcd)?;
 
@@ -388,7 +418,7 @@ mod tests {
         //let transform = panorama.to_slide_transform();
 
         let output_location = "/home/alan/Documents/Nicole/Salmonella/";
-        let path = std::path::Path::new(output_location);
+        let _path = std::path::Path::new(output_location);
 
         /*for panorama in slide.panoramas() {
             let panorama_image = panorama.image();
@@ -429,10 +459,10 @@ mod tests {
             }
         }*/
 
-        let resized_image = slide.create_overview_image(15000);
-        resized_image
-            .save(path.join("slide_overview.jpeg"))
-            .unwrap();
+        //let resized_image = slide.create_overview_image(15000);
+        //resized_image
+        //    .save(path.join("slide_overview.jpeg"))
+        //    .unwrap();
 
         /*
         let mut points = Vec::new();
