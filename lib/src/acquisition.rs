@@ -32,6 +32,12 @@ pub(crate) struct DataLocation {
     pub(crate) sizes: Vec<u64>,
 }
 
+pub enum AcquisitionIdentifier {
+    Id(u16),
+    Order(i16),
+    Description(String),
+}
+
 #[derive(Debug)]
 pub struct Acquisition<T: Read + Seek> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
@@ -127,6 +133,10 @@ impl<T: Read + Seek> Acquisition<T> {
         &self.description
     }
 
+    pub fn order_number(&self) -> i16 {
+        self.order_number
+    }
+
     pub fn width(&self) -> i32 {
         self.max_x
     }
@@ -170,7 +180,7 @@ impl<T: Read + Seek> Acquisition<T> {
         AffineTransform::from_points(moving_points, fixed_points)
     }
 
-    pub fn slide_bounding_box(&self) -> BoundingBox {
+    pub fn slide_bounding_box(&self) -> BoundingBox<f64> {
         // There seems to be a bug where the start and end x pos is recorded as the same value
         let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
             true => {
@@ -299,6 +309,7 @@ impl<T: Read + Seek> Acquisition<T> {
 
         if let Some(data_location) = &self.dcm_location {
             let mut reader = data_location.reader.lock().unwrap();
+
             let offset = data_location.offsets[channel.order_number() as usize];
             let mut buf = vec![0; data_location.sizes[channel.order_number() as usize] as usize];
 
@@ -373,34 +384,15 @@ impl<T: Read + Seek> Acquisition<T> {
     }
 }
 
+#[rustfmt::skip]
 impl<T: Seek + Read> Print for Acquisition<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Acquisition", 48)?;
-        writeln!(
-            writer,
-            "{:indent$}{: <22} | {}",
-            "",
-            "ID",
-            self.id,
-            indent = indent
-        )?;
-        writeln!(
-            writer,
-            "{:indent$}{: <22} | {}",
-            "",
-            "Description",
-            self.description,
-            indent = indent
-        )?;
-        writeln!(
-            writer,
-            "{:indent$}{: <22} | {}",
-            "",
-            "Order number",
-            self.order_number,
-            indent = indent
-        )?;
+
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "ID",          self.id,          indent = indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Description", self.description, indent = indent)?;
+        writeln!(writer, "{:indent$}{: <22} | {}", "", "Order number", self.order_number, indent = indent)?;
         writeln!(
             writer,
             "{:indent$}{: <22} | {} x {}",

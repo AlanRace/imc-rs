@@ -1,3 +1,4 @@
+#![feature(hash_set_entry)]
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
@@ -32,6 +33,8 @@ mod images;
 mod panorama;
 mod slide;
 
+pub mod halo;
+
 pub use self::acquisition::Acquisition;
 pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
@@ -45,6 +48,7 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
 
+use acquisition::AcquisitionIdentifier;
 use mcd::{MCDParser, ParserState};
 
 use image::ImageFormat;
@@ -134,6 +138,56 @@ impl<T: Seek + Read> MCD<T> {
 
     fn slides_mut(&mut self) -> &mut HashMap<u16, Slide<T>> {
         &mut self.slides
+    }
+
+    pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
+        let mut acquisitions = HashMap::new();
+
+        // This should be unnecessary - hopefully there is only one set of channels per dataset?
+        for slide in self.slides.values() {
+            for panorama in slide.panoramas() {
+                for acquisition in panorama.acquisitions() {
+                    acquisitions.insert(acquisition.id(), acquisition);
+                }
+            }
+        }
+
+        let mut ordered_acquisitions = Vec::new();
+        for (_, acquisition) in acquisitions.drain() {
+            ordered_acquisitions.push(acquisition);
+        }
+
+        ordered_acquisitions.sort_by_key(|a| a.id());
+
+        ordered_acquisitions
+    }
+
+    pub fn acquisition(&self, identifier: &AcquisitionIdentifier) -> Option<&Acquisition<T>> {
+        for slide in self.slides.values() {
+            for panorama in slide.panoramas() {
+                for acquisition in panorama.acquisitions() {
+                    match identifier {
+                        AcquisitionIdentifier::Id(id) => {
+                            if acquisition.id() == *id {
+                                return Some(acquisition);
+                            }
+                        }
+                        AcquisitionIdentifier::Order(order_number) => {
+                            if acquisition.order_number() == *order_number {
+                                return Some(acquisition);
+                            }
+                        }
+                        AcquisitionIdentifier::Description(description) => {
+                            if acquisition.description() == description {
+                                return Some(acquisition);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Returns a vector of all channels present within any acquisition performed on the slide, sorted by channel order number.
@@ -226,6 +280,7 @@ impl<T: Seek + Read> MCD<T> {
     }
 }
 
+#[rustfmt::skip]
 impl<T: Seek + Read> Print for MCD<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         writeln!(writer, "MCD File: {}", self.location)?;
@@ -244,6 +299,7 @@ impl<T: Seek + Read> Print for MCD<T> {
         let channels = self.channels();
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Channels", 25)?;
+
         for channel in channels {
             writeln!(
                 writer,
@@ -273,15 +329,15 @@ pub enum ImageFormat {
 
 /// Represents a bounding rectangle
 #[derive(Debug)]
-pub struct BoundingBox {
+pub struct BoundingBox<T> {
     /// Minimum x coordinate for the bounding rectangle
-    pub min_x: f64,
+    pub min_x: T,
     /// Minimum y coordinate for the bounding rectangle
-    pub min_y: f64,
+    pub min_y: T,
     /// Width of bounding rectangle
-    pub width: f64,
+    pub width: T,
     /// Height of bounding rectangle
-    pub height: f64,
+    pub height: T,
 }
 
 /// Represents a channel image (stored as a vector of f32).
@@ -328,8 +384,11 @@ impl ChannelImage {
 
 #[cfg(test)]
 mod tests {
+    use image::{ImageBuffer, Pixel, Rgba};
+
     use super::*;
 
+    use core::panic;
     use std::fs::File;
     use std::time::Instant;
 
@@ -419,6 +478,102 @@ mod tests {
 
         let output_location = "/home/alan/Documents/Nicole/Salmonella/";
         let _path = std::path::Path::new(output_location);
+
+        for acquisition in mcd.acquisitions() {
+            println!("[{}] {}", acquisition.id(), acquisition.description());
+        }
+
+        let acquisition = mcd
+            .acquisition(&AcquisitionIdentifier::Description("ROI 25".to_string()))
+            .unwrap();
+
+        for channel in acquisition.channels() {
+            println!("[{}] {}", channel.label(), channel.name());
+        }
+
+        let data = acquisition.channel_data(&ChannelIdentifier::Label("Ki67_B56".to_string()));
+
+        let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::new(data.width as u32, data.height as u32);
+
+        let mut index = 0;
+        let max_value = 20.0;
+        for y in 0..data.height {
+            if index >= data.valid_pixels {
+                break;
+            }
+
+            for x in 0..data.width {
+                if index >= data.valid_pixels {
+                    break;
+                }
+
+                let g = ((data.data[index] / max_value) * 255.0) as u8;
+                let g = g as f64 / 255.0;
+
+                let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                cur_pixel[1] = (g * 255.0) as u8;
+                cur_pixel[3] = 255;
+
+                index += 1;
+            }
+        }
+
+        acq_image.save("ki67.png").unwrap();
+
+        //let cell_data = halo::parse_from_path("/home/alan/Documents/Nicole/Object data for phenotype correlation/VS_object data_final.csv")?;
+
+        let positive_header = cell_data.header("Ki67_B56(Dy162Di) Positive").unwrap();
+        let positive_cell = cell_data
+            .column_data(positive_header.column_number())
+            .unwrap();
+
+        let positive_cell = match positive_cell {
+            halo::ColumnData::Binary(data) => data,
+            _ => {
+                panic!("Wrong type of data in cell?");
+            }
+        };
+
+        for (index, boundary) in cell_data.boundaries().enumerate() {
+            //println!("[{}] {:?}", index, boundary);
+
+            if positive_cell[index] {
+                for y in [0, boundary.height] {
+                    for x in 0..boundary.width {
+                        let x = x + boundary.min_x;
+                        let y = y + boundary.min_y;
+
+                        if x < 0 || y < 0 || x >= data.width.into() || y >= data.height.into() {
+                            continue;
+                        }
+
+                        let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                        cur_pixel[0] = 255.0 as u8;
+                    }
+                }
+
+                for x in [0, boundary.width] {
+                    for y in 0..boundary.height {
+                        let x = x + boundary.min_x;
+                        let y = y + boundary.min_y;
+
+                        if x < 0 || y < 0 || x >= data.width.into() || y >= data.height.into() {
+                            continue;
+                        }
+
+                        let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                        cur_pixel[0] = 255.0 as u8;
+                    }
+                }
+            }
+
+            /*if index > 10 {
+                break;
+            }*/
+        }
+
+        acq_image.save("ki67_with_markers.png").unwrap();
 
         /*for panorama in slide.panoramas() {
             let panorama_image = panorama.image();

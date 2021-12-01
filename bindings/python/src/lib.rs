@@ -137,6 +137,7 @@ impl Mcd {
         for channel in self.mcd.channels() {
             channels.push(AcquisitionChannel {
                 name: channel.name().to_string(),
+                label: channel.label().to_string(),
             })
         }
 
@@ -147,12 +148,17 @@ impl Mcd {
 #[pyclass]
 struct AcquisitionChannel {
     name: String,
+    label: String,
 }
 
 #[pymethods]
 impl AcquisitionChannel {
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
     }
 }
 
@@ -398,6 +404,7 @@ impl Acquisition {
         for channel in acquisition.channels() {
             channels.push(AcquisitionChannel {
                 name: channel.name().to_string(),
+                label: channel.label().to_string(),
             })
         }
 

@@ -93,7 +93,7 @@ impl<T: Seek + Read> Panorama<T> {
         }
     }
 
-    pub fn slide_bounding_box(&self) -> BoundingBox {
+    pub fn slide_bounding_box(&self) -> BoundingBox<f64> {
         let min_x = f64::min(
             self.slide_x1_pos_um,
             f64::min(
@@ -191,26 +191,14 @@ impl<T: Seek + Read> Panorama<T> {
     }
 }
 
+#[rustfmt::skip]
 impl<T: Seek + Read> Print for Panorama<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Panorama", 42)?;
-        writeln!(
-            writer,
-            "{:indent$}{: <20} | {}",
-            "",
-            "ID",
-            self.id,
-            indent = indent
-        )?;
-        writeln!(
-            writer,
-            "{:indent$}{: <20} | {}",
-            "",
-            "Slide ID",
-            self.slide_id,
-            indent = indent
-        )?;
+
+        writeln!(writer, "{:indent$}{: <20} | {}", "", "ID", self.id, indent = indent)?;
+        writeln!(writer, "{:indent$}{: <20} | {}", "", "Slide ID", self.slide_id, indent = indent)?;
         writeln!(
             writer,
             "{:indent$}{: <20} | {}",

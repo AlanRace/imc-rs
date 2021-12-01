@@ -299,6 +299,7 @@ impl<T: Seek + Read> Slide<T> {
     }
 }
 
+#[rustfmt::skip]
 impl<T: Seek + Read> Print for Slide<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
