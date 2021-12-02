@@ -10,7 +10,9 @@ use image::{
 };
 use image::{io::Reader as ImageReader, Pixel};
 
-use crate::{channel::ChannelIdentifier, images::read_image_data, Panorama, Print};
+use crate::{
+    channel::ChannelIdentifier, error::MCDError, images::read_image_data, Panorama, Print,
+};
 
 use crate::mcd::SlideXML;
 
@@ -133,7 +135,7 @@ impl<T: Seek + Read> Slide<T> {
         &self,
         width: u32,
         channel_to_show: Option<(&ChannelIdentifier, Option<f32>)>,
-    ) -> RgbaImage {
+    ) -> Result<RgbaImage, MCDError> {
         let slide_image = self.dynamic_image();
 
         // Move into function to help debugging
@@ -195,7 +197,7 @@ impl<T: Seek + Read> Slide<T> {
 
                     //let bounding_box = acquisition.slide_bounding_box();
                     let transform = acquisition.to_slide_transform();
-                    let data = acquisition.channel_data(identifier);
+                    let data = acquisition.channel_data(identifier)?;
 
                     let max_value = match max_value {
                         Some(value) => value,
@@ -258,7 +260,7 @@ impl<T: Seek + Read> Slide<T> {
             }
         }
 
-        resized_image
+        Ok(resized_image)
     }
 
     /// Returns a vector of panorama ids sorted by ID number. This allocates a new vector on each call.

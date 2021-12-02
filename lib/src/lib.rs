@@ -484,14 +484,22 @@ mod tests {
         }
 
         let acquisition = mcd
-            .acquisition(&AcquisitionIdentifier::Description("ROI 25".to_string()))
+            .acquisition(&AcquisitionIdentifier::Description("ROI 10".to_string()))
             .unwrap();
+
+        let x_channel = acquisition
+            .channel_data(&ChannelIdentifier::Name("X".to_string()))
+            .unwrap();
+
+        println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
 
         for channel in acquisition.channels() {
             println!("[{}] {}", channel.label(), channel.name());
         }
 
-        let data = acquisition.channel_data(&ChannelIdentifier::Label("Ki67_B56".to_string()));
+        let data = acquisition
+            .channel_data(&ChannelIdentifier::Label("Ki67_B56".to_string()))
+            .unwrap();
 
         let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::new(data.width as u32, data.height as u32);

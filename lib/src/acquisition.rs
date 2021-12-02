@@ -301,11 +301,13 @@ impl<T: Read + Seek> Acquisition<T> {
         measured_size / self.spectrum_size()
     }
 
-    pub fn channel_data(&self, identifier: &ChannelIdentifier) -> ChannelImage {
+    pub fn channel_data(&self, identifier: &ChannelIdentifier) -> Result<ChannelImage, MCDError> {
         let channel = self.channel(identifier).unwrap();
         let mut data = vec![0.0f32; self.num_spectra()];
         let mut min_value = f32::MAX;
         let mut max_value = f32::MIN;
+
+        //println!("DCM Location: {:?}", self.dcm_location);
 
         if let Some(data_location) = &self.dcm_location {
             let mut reader = data_location.reader.lock().unwrap();
@@ -313,10 +315,23 @@ impl<T: Read + Seek> Acquisition<T> {
             let offset = data_location.offsets[channel.order_number() as usize];
             let mut buf = vec![0; data_location.sizes[channel.order_number() as usize] as usize];
 
+            /*println!("About to read channel {:?}", channel);
+            println!(
+                "[Order number: {}] Offset {} and buffer length {} with num spectra {}",
+                channel.order_number(),
+                offset,
+                buf.len(),
+                self.num_spectra()
+            );*/
+
             reader.seek(SeekFrom::Start(offset)).unwrap();
             reader.read_exact(&mut buf).unwrap();
 
-            let decompressed_data = lz4_flex::decompress(&buf, self.num_spectra() * 4).unwrap();
+            let decompressed_data = lz4_flex::decompress(&buf, self.num_spectra() * 4);
+            if let Err(error) = decompressed_data {
+                return Err(MCDError::from(error));
+            }
+            let decompressed_data = decompressed_data.unwrap();
             let mut decompressed_data = Cursor::new(decompressed_data);
 
             decompressed_data
@@ -350,13 +365,13 @@ impl<T: Read + Seek> Acquisition<T> {
             }
         }
 
-        ChannelImage {
+        Ok(ChannelImage {
             width: self.max_x,
             height: self.max_y,
             range: (min_value, max_value),
             valid_pixels: self.num_spectra(),
             data,
-        }
+        })
     }
 
     pub fn channel(&self, identifier: &ChannelIdentifier) -> Option<&AcquisitionChannel> {

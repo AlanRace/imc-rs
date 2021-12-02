@@ -146,7 +146,7 @@ impl Write for TemporaryFile {
 
 pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
     let mut acquisition_offsets = HashMap::new();
-    println!("Opening {:?} for writing", mcd.dcm_file());
+    //println!("Opening {:?} for writing", mcd.dcm_file());
     let dcm_file = std::fs::File::create(mcd.dcm_file()).unwrap();
     let mut dcm_file = BufWriter::new(dcm_file);
 
@@ -158,7 +158,10 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
         }
     }
 
+    //println!("Writing {} acquisitions.", num_acquisitions);
+
     dcm_file.write_u8(num_acquisitions as u8)?;
+    let index_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
     dcm_file.write_all(&vec![0; num_acquisitions * 11])?;
 
     let mut acquisition_index: Vec<(u16, u64, u8)> = Vec::new();
@@ -190,14 +193,14 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
                     acquisition.channels().len() as u8,
                 ));
 
-                // Write out empty data which we will overwrite with the indicies later
-                dcm_file.write_all(&vec![0; acquisition.channels().len() * 8])?;
+                // Write out empty data which we will overwrite with the indicies and sizes later
+                dcm_file.write_all(&vec![0; acquisition.channels().len() * 16])?;
 
                 let mut buf = vec![0; acquisition.num_spectra() * 4];
                 let mut offsets = Vec::new();
                 let mut sizes = Vec::new();
 
-                for (file, channel) in files.iter_mut().zip(acquisition.channels()) {
+                for file in files.iter_mut() {
                     file.seek(SeekFrom::Start(0)).unwrap();
                     file.read_exact(&mut buf).unwrap();
 
@@ -209,14 +212,6 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
 
                     offsets.push(cur_location);
                     sizes.push(new_location - cur_location);
-
-                    println!(
-                        "{}: {} to {} -> {:.2}",
-                        channel.label(),
-                        buf.len(),
-                        compressed.len(),
-                        compressed.len() as f64 / buf.len() as f64 * 100.0
-                    );
                 }
 
                 let acquisition_end_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
@@ -243,21 +238,21 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
                     },
                 );
 
-                println!("{:?}", acquisition_offsets);
-                println!("{:?} done", acquisition.description());
+                //println!("{:?}", acquisition_offsets);
+                //println!("{:?} done", acquisition.description());
             }
         }
     }
 
-    let cur_offset = dcm_file.seek(SeekFrom::Start(0)).unwrap();
-    println!("Offset before starting to write: {}", cur_offset);
+    // Go to location to write the index now we know where the data is stored
+    dcm_file.seek(SeekFrom::Start(index_location)).unwrap();
 
     for &(acquisition_id, offset, num_channels) in &acquisition_index {
         dcm_file.write_u16::<LittleEndian>(acquisition_id).unwrap();
         dcm_file.write_u64::<LittleEndian>(offset).unwrap();
         dcm_file.write_u8(num_channels).unwrap();
 
-        println!("Written: {}, {}", acquisition_id, offset);
+        //  println!("Written: {}, {}", acquisition_id, offset);
     }
 
     dcm_file.flush().unwrap();
@@ -266,15 +261,15 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
 }
 
 pub fn open<T: Read + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
-    println!("Opening {:?} for reading", mcd.dcm_file());
+    //println!("Opening {:?} for reading", mcd.dcm_file());
     let dcm_file = std::fs::File::open(mcd.dcm_file()).unwrap();
     let dcm_file_arc = Arc::new(Mutex::new(BufReader::new(dcm_file)));
     let mut dcm_file = dcm_file_arc.lock().unwrap();
 
     let num_acquisitions = dcm_file.read_u8()?;
 
-    let cur_offset = dcm_file.seek(SeekFrom::Start(0)).unwrap();
-    println!("Offset before starting to read: {}", cur_offset);
+    let cur_offset = dcm_file.seek(SeekFrom::Current(0)).unwrap();
+    //println!("Offset before starting to read: {}", cur_offset);
     let mut acquisition_offsets = HashMap::with_capacity(num_acquisitions as usize);
 
     for _i in 0..num_acquisitions {
@@ -287,10 +282,13 @@ pub fn open<T: Read + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
         acquisition_offsets.insert(id, (offset, num_channels));
     }
 
+    //println!("Offset keys: {:?}", acquisition_offsets.keys());
+
     for slide in mcd.slides_mut().values_mut() {
         for panorama in slide.panoramas_mut().values_mut() {
             for acquisition in panorama.acquisitions_mut().values_mut() {
                 let offset = acquisition_offsets.get(&acquisition.id());
+
                 if let Some(&(offset, num_channels)) = offset {
                     dcm_file.seek(SeekFrom::Start(offset)).unwrap();
                     let mut offsets = vec![0; num_channels as usize];
@@ -301,11 +299,20 @@ pub fn open<T: Read + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
                         *size = dcm_file.read_u64::<LittleEndian>().unwrap();
                     }
 
+                    //println!("Offsets: {:?}", offsets);
+                    //println!("Size: {:?}", sizes);
+
                     acquisition.dcm_location = Some(DataLocation {
                         reader: dcm_file_arc.clone(),
                         offsets,
                         sizes,
-                    })
+                    });
+
+                    /*println!(
+                        "[{}] DCM Location: {:?}",
+                        acquisition.description(),
+                        acquisition.dcm_location
+                    );*/
                 }
             }
         }

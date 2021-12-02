@@ -264,10 +264,10 @@ impl Slide {
         channel: Option<&'py AcquisitionChannel>,
         max_value: Option<f32>,
         py: Python<'py>,
-    ) -> &'py PyArray3<u8> {
+    ) -> PyResult<&'py PyArray3<u8>> {
         let slide = self.get_slide();
 
-        let image = match channel {
+        let overview_image = match channel {
             Some(channel) => {
                 let identifier = ChannelIdentifier::Name(channel.name.clone());
 
@@ -275,6 +275,14 @@ impl Slide {
             }
             None => slide.create_overview_image(width.unwrap_or(7500), None),
         };
+
+        let image = match overview_image {
+            Ok(image) => image,
+            Err(error) => {
+                return Err(exceptions::PyIOError::new_err(error.to_string()));
+            }
+        };
+
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -282,7 +290,7 @@ impl Slide {
         //println!("image_raw = {}, array = ({}, {}, 3)", raw_image.len(), width, height);
 
         let array = Array::from_shape_vec((height, width, 4), raw_image).unwrap();
-        array.into_pyarray(py)
+        Ok(array.into_pyarray(py))
     }
 }
 
@@ -415,11 +423,16 @@ impl Acquisition {
         &self,
         channel: &'py AcquisitionChannel,
         py: Python<'py>,
-    ) -> &'py PyArray2<f32> {
+    ) -> PyResult<&'py PyArray2<f32>> {
         let acquisition = self.get_acquisition();
 
         let identifier = ChannelIdentifier::Name(channel.name.clone());
-        let channel_data = acquisition.channel_data(&identifier);
+        let channel_data = match acquisition.channel_data(&identifier) {
+            Ok(channel_data) => channel_data,
+            Err(error) => {
+                return Err(exceptions::PyIOError::new_err(error.to_string()));
+            }
+        };
 
         let data = match !channel_data.is_complete() {
             true => channel_data.intensities().to_vec(),
@@ -442,7 +455,7 @@ impl Acquisition {
             data,
         )
         .unwrap();
-        array.into_pyarray(py)
+        Ok(array.into_pyarray(py))
     }
 }
 
