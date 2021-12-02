@@ -1,6 +1,7 @@
 //! python bindings for imc-rs, a library for accessing imaging mass cytometry data.
 
 use imc_rs::ChannelIdentifier;
+use imc_rs::HasOpticalImage;
 use numpy::PyArray2;
 use pyo3::exceptions;
 use pyo3::prelude::*;

@@ -11,6 +11,7 @@ use rand::prelude::*;
 use crate::{acquisition::DataLocation, MCD};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct AcquisitionOffset {
     id: u16,
     offsets: Vec<u64>,
@@ -267,9 +268,6 @@ pub fn open<T: Read + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
     let mut dcm_file = dcm_file_arc.lock().unwrap();
 
     let num_acquisitions = dcm_file.read_u8()?;
-
-    let cur_offset = dcm_file.seek(SeekFrom::Current(0)).unwrap();
-    //println!("Offset before starting to read: {}", cur_offset);
     let mut acquisition_offsets = HashMap::with_capacity(num_acquisitions as usize);
 
     for _i in 0..num_acquisitions {

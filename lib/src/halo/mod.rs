@@ -6,6 +6,7 @@ use std::{
 
 use crate::BoundingBox;
 
+/// Parse output from HALO cell detection stored as a .csv file, returning a representation of the cell data
 pub fn parse_from_path<P: AsRef<Path>>(path: P) -> std::io::Result<CellData> {
     //parse_from_path(path.as_ref())
     let file = std::fs::File::open(path)?;
@@ -22,11 +23,17 @@ enum ColumnType {
     Float,
 }
 
+/// Represents the data stored in a column. Assumes that all data is of the same type.
+/// Strings are stored as a DictionaryID as most strings appear multiple times.
 #[derive(Debug)]
 pub enum ColumnData {
+    /// Text data, stored as a DictionaryID
     Text(Vec<DictionaryID>),
+    /// Binary column data
     Binary(Vec<bool>),
+    /// Integer column data
     Integer(Vec<i64>),
+    /// Floating point column data
     Float(Vec<f64>),
 }
 
@@ -38,10 +45,12 @@ pub struct Column {
 }
 
 impl Column {
+    /// Returns the name (title) of the column
     pub fn name(&self) -> &str {
         &self.description.name
     }
 
+    /// Returns the index of the column (number representing the order in which the column appears)
     pub fn column_number(&self) -> usize {
         self.number
     }
@@ -152,13 +161,18 @@ impl Dictionary {
     }
 }
 
+/// Represents cell segmentation and analysis data parsed from .csv file
+#[allow(dead_code)]
 pub struct CellData {
     headers: Vec<Column>,
     data: Vec<ColumnData>,
     dictionary: Dictionary,
 }
 
+// TODO: Allow selecting column based on Header, Index, HeaderContains,...
+
 impl CellData {
+    /// Returns a header `Column` with the specified name
     pub fn header(&self, name: &str) -> Option<&Column> {
         for header in &self.headers {
             if header.description.name == name {
@@ -169,6 +183,7 @@ impl CellData {
         None
     }
 
+    /// Returns the data in the column at the ith position in the file
     pub fn column_data(&self, index: usize) -> Option<&ColumnData> {
         if index < self.data.len() {
             Some(&self.data[index])
@@ -177,6 +192,7 @@ impl CellData {
         }
     }
 
+    /// Returns an iterator over each cell, providing the detected boundaries for each cell
     pub fn boundaries(&self) -> BoundariesIterator {
         let x_min_header = self.header("XMin").unwrap();
         let x_min_data = self.column_data(x_min_header.column_number()).unwrap();
@@ -209,6 +225,7 @@ impl CellData {
     }
 }
 
+/// Iterator over each cell, providing the detected boundaries for each cell
 pub struct BoundariesIterator<'a> {
     x_min_data: &'a Vec<i64>,
     x_max_data: &'a Vec<i64>,
@@ -237,6 +254,7 @@ impl<'a> Iterator for BoundariesIterator<'a> {
     }
 }
 
+/// Parse output from HALO cell detection stored as a .csv file, returning a representation of the cell data
 pub fn parse<R: Read + Seek>(reader: R) -> std::io::Result<CellData> {
     let mut rdr = csv::Reader::from_reader(reader);
 

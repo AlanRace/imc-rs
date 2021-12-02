@@ -5,7 +5,7 @@ use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector2, Vector3, QR};
 #[derive(Debug)]
 pub enum Direction {
     ToSlide,
-    FromSlide,
+    //FromSlide,
 }
 
 // Create a trait which captures necessary traits for matrix multiplication
@@ -106,24 +106,24 @@ where
         }
     }
 
-    fn get_inv_matrix(&self) -> &Matrix3<T> {
+    /*fn get_inv_matrix(&self) -> &Matrix3<T> {
         // TODO: invert the matrix if necessary
         &self.matrix
-    }
+    }*/
 
     pub fn to_slide_matrix(&self) -> &Matrix3<T> {
         match self.direction {
             Direction::ToSlide => &self.matrix,
-            Direction::FromSlide => self.get_inv_matrix(),
+            //     Direction::FromSlide => self.get_inv_matrix(),
         }
     }
 
-    pub fn from_slide_matrix(&self) -> &Matrix3<T> {
+    /*pub fn from_slide_matrix(&self) -> &Matrix3<T> {
         match self.direction {
             Direction::ToSlide => self.get_inv_matrix(),
-            Direction::FromSlide => &self.matrix,
+            //   Direction::FromSlide => &self.matrix,
         }
-    }
+    }*/
 
     pub fn transform_to_slide(&self, x: T, y: T) -> Option<Vector3<T>> {
         let point = Vector3::new(x, y, T::one());

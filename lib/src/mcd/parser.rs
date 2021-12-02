@@ -98,6 +98,7 @@ pub enum ParserState {
     ProcessingPanoramaPixelYPos,
     ProcessingPanorama,
     Processing,
+    #[allow(dead_code)]
     Error,
     FatalError, // Must stop here
     Finished,
@@ -269,10 +270,11 @@ impl<T: Seek + Read> MCDParser<T> {
         self.state
     }
 
+    #[allow(dead_code)]
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
-
+    #[allow(dead_code)]
     pub fn pop_error_front(&mut self) -> Option<String> {
         self.errors.pop_front()
     }

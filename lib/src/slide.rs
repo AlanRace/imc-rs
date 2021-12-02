@@ -11,7 +11,8 @@ use image::{
 use image::{io::Reader as ImageReader, Pixel};
 
 use crate::{
-    channel::ChannelIdentifier, error::MCDError, images::read_image_data, Panorama, Print,
+    channel::ChannelIdentifier, error::MCDError, images::read_image_data, HasOpticalImage, OnSlide,
+    Panorama, Print,
 };
 
 use crate::mcd::SlideXML;

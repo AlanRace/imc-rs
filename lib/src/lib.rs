@@ -33,6 +33,7 @@ mod images;
 mod panorama;
 mod slide;
 
+/// Provides methods for reading in cell segmentation data from Halo
 pub mod halo;
 
 pub use self::acquisition::Acquisition;
@@ -51,7 +52,8 @@ use std::collections::HashMap;
 use acquisition::AcquisitionIdentifier;
 use mcd::{MCDParser, ParserState};
 
-use image::ImageFormat;
+use image::{ImageFormat, RgbaImage};
+use transform::AffineTransform;
 
 const BUF_SIZE: usize = 4096;
 
@@ -59,6 +61,24 @@ const BUF_SIZE: usize = 4096;
 pub trait Print {
     /// Formats and prints to `writer`
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result;
+}
+
+/// Represents property of having an optical image
+pub trait HasOpticalImage {
+    /// Returns the binary data for the image, exactly as stored in the .mcd file
+    fn image_data(&self) -> Result<Vec<u8>, std::io::Error>;
+    /// Returns the format of the stored optical image
+    fn image_format(&self) -> ImageFormat;
+    /// Returns a decoded RgbaImage of the panorama image
+    fn image(&self) -> RgbaImage;
+}
+
+/// Represents an image which is acquired on a slide
+pub trait OnSlide {
+    /// Returns the bounding box encompasing the image area on the slide (in μm)
+    fn slide_bounding_box(&self) -> BoundingBox<f64>;
+    /// Returns the affine transformation from pixel coordinates within the image to to the slide coordinates (μm)
+    fn to_slide_transform(&self) -> AffineTransform<f64>;
 }
 
 /// Represents a imaging mass cytometry (*.mcd) file.
@@ -140,6 +160,7 @@ impl<T: Seek + Read> MCD<T> {
         &mut self.slides
     }
 
+    /// Return a vector of references to all acquisitions in the .mcd file (iterates over all slides and all panoramas).
     pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
         let mut acquisitions = HashMap::new();
 
@@ -162,6 +183,7 @@ impl<T: Seek + Read> MCD<T> {
         ordered_acquisitions
     }
 
+    /// Return an acquisition which matches the supplied `AcquisitionIdentifier` or None if no match found
     pub fn acquisition(&self, identifier: &AcquisitionIdentifier) -> Option<&Acquisition<T>> {
         for slide in self.slides.values() {
             for panorama in slide.panoramas() {

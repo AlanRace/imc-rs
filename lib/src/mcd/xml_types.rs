@@ -1,7 +1,6 @@
 use crate::acquisition::DataFormat;
 
-use super::{Acquisition, AcquisitionChannel, ImageFormat};
-use std::io::{Read, Seek};
+use super::{AcquisitionChannel, ImageFormat};
 
 #[derive(Debug)]
 pub(crate) enum ROIType {

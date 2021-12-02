@@ -1,9 +1,14 @@
+/// ChannelIdentifier describes how a channel can be identified
 pub enum ChannelIdentifier {
+    /// Order number of the channel (order of acquisition)
     Order(i16),
+    /// Name of the channel
     Name(String),
+    /// Label given to the channel
     Label(String),
 }
 
+/// AcquisitionChannel represents a single channel acquired, forming part of an acquisition
 #[derive(Debug)]
 pub struct AcquisitionChannel {
     id: u16,
@@ -30,22 +35,31 @@ impl AcquisitionChannel {
         }
     }
 
+    /// Returns the ID associated with the channel
     #[inline]
     pub fn id(&self) -> u16 {
         self.id
     }
+
+    /// Returns the acquisition ID to which this channel belongs
     #[inline]
     pub fn acquisition_id(&self) -> u16 {
         self.acquisition_id
     }
+
+    /// Returns the given name of the channel
     #[inline]
     pub fn name(&self) -> &str {
         &self.channel_name
     }
+
+    /// Returns the position in the order in which this channel was acquired
     #[inline]
     pub fn order_number(&self) -> i16 {
         self.order_number
     }
+
+    /// Returns the label given to the channel
     #[inline]
     pub fn label(&self) -> &str {
         &self.channel_label

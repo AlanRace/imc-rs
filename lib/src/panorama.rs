@@ -11,7 +11,7 @@ use nalgebra::Vector2;
 
 use crate::{
     images::read_image_data, mcd::PanoramaXML, transform::AffineTransform, Acquisition,
-    BoundingBox, Print,
+    BoundingBox, HasOpticalImage, OnSlide, Print,
 };
 
 /// Represents a panorama (containing one or more acquisitions)
@@ -62,15 +62,63 @@ impl<T: Seek + Read> Panorama<T> {
         (self.pixel_width, self.pixel_height)
     }
 
+    /// Returns a scaling coefficient for pixel sizes
     pub fn pixel_scale_coef(&self) -> f64 {
         self.pixel_scale_coef
     }
 
-    pub fn image_format(&self) -> ImageFormat {
+    /// Returns a sorted (acsending) list of acquisition IDs
+    pub fn acquisition_ids(&self) -> Vec<u16> {
+        let mut ids: Vec<u16> = Vec::with_capacity(self.acquisitions.len());
+
+        for id in self.acquisitions.keys() {
+            ids.push(*id);
+        }
+
+        ids.sort_unstable();
+
+        ids
+    }
+
+    /// Returns an acquisition with the supplied ID, or None if none exists
+    pub fn acquisition(&self, id: u16) -> Option<&Acquisition<T>> {
+        self.acquisitions.get(&id)
+    }
+
+    /// Returns a vector of acquisition references ordered by acquistion ID number
+    pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
+        let mut acquisitions = Vec::new();
+
+        let ids = self.acquisition_ids();
+        for id in ids {
+            acquisitions.push(
+                self.acquisition(id)
+                    .expect("Should only be getting acquisitions that exist"),
+            );
+        }
+
+        acquisitions
+    }
+
+    pub(crate) fn acquisitions_mut(&mut self) -> &mut HashMap<u16, Acquisition<T>> {
+        &mut self.acquisitions
+    }
+
+    fn dynamic_image(&self) -> DynamicImage {
+        let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
+        reader.set_format(ImageFormat::Png);
+        reader.decode().unwrap()
+    }
+}
+
+impl<T: Seek + Read> HasOpticalImage for Panorama<T> {
+    /// Returns the format that the panorama image is stored in
+    fn image_format(&self) -> ImageFormat {
         self.image_format
     }
 
-    pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+    /// Returns the binary data for the image, exactly as stored in the .mcd file
+    fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
@@ -80,20 +128,18 @@ impl<T: Seek + Read> Panorama<T> {
         read_image_data(reader, self.image_start_offset, self.image_end_offset)
     }
 
-    fn dynamic_image(&self) -> DynamicImage {
-        let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
-        reader.set_format(ImageFormat::Png);
-        reader.decode().unwrap()
-    }
-
-    pub fn image(&self) -> RgbaImage {
+    /// Returns a decoded RgbaImage of the panorama image
+    fn image(&self) -> RgbaImage {
         match self.dynamic_image() {
             DynamicImage::ImageRgba8(rgba8) => rgba8,
             _ => panic!("Unexpected DynamicImage type"),
         }
     }
+}
 
-    pub fn slide_bounding_box(&self) -> BoundingBox<f64> {
+impl<T: Seek + Read> OnSlide for Panorama<T> {
+    /// Returns the bounding box encompasing the panorama image area on the slide (in μm)
+    fn slide_bounding_box(&self) -> BoundingBox<f64> {
         let min_x = f64::min(
             self.slide_x1_pos_um,
             f64::min(
@@ -131,46 +177,8 @@ impl<T: Seek + Read> Panorama<T> {
         }
     }
 
-    pub fn acquisition_ids(&self) -> Vec<u16> {
-        let mut ids: Vec<u16> = Vec::with_capacity(self.acquisitions.len());
-
-        for id in self.acquisitions.keys() {
-            ids.push(*id);
-        }
-
-        ids.sort_unstable();
-
-        ids
-    }
-
-    pub fn acquisition(&self, id: u16) -> Option<&Acquisition<T>> {
-        self.acquisitions.get(&id)
-    }
-
-    fn acquisition_mut(&mut self, id: u16) -> Option<&mut Acquisition<T>> {
-        self.acquisitions.get_mut(&id)
-    }
-
-    // Get acquisitions ordered by ID
-    pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
-        let mut acquisitions = Vec::new();
-
-        let ids = self.acquisition_ids();
-        for id in ids {
-            acquisitions.push(
-                self.acquisition(id)
-                    .expect("Should only be getting acquisitions that exist"),
-            );
-        }
-
-        acquisitions
-    }
-
-    pub(crate) fn acquisitions_mut(&mut self) -> &mut HashMap<u16, Acquisition<T>> {
-        &mut self.acquisitions
-    }
-
-    pub fn to_slide_transform(&self) -> AffineTransform<f64> {
+    /// Returns the affine transformation from pixel coordinates within the panorama to to the slide coordinates (μm)
+    fn to_slide_transform(&self) -> AffineTransform<f64> {
         let mut moving_points = Vec::new();
         let mut fixed_points = Vec::new();
 

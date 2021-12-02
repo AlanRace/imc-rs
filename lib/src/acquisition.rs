@@ -16,7 +16,7 @@ use crate::{
     images::read_image_data,
     mcd::AcquisitionXML,
     transform::AffineTransform,
-    BoundingBox, ChannelImage, Print,
+    BoundingBox, ChannelImage, OnSlide, Print,
 };
 
 #[derive(Debug)]
@@ -38,6 +38,7 @@ pub enum AcquisitionIdentifier {
     Description(String),
 }
 
+/// Acquisition represents a single region analysed by IMC.
 #[derive(Debug)]
 pub struct Acquisition<T: Read + Seek> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
@@ -125,80 +126,42 @@ impl<'a, T: Read + Seek> Iterator for SpectrumIterator<'a, T> {
 }
 
 impl<T: Read + Seek> Acquisition<T> {
+    /// Returns the ID associated with the acquisition
     pub fn id(&self) -> u16 {
         self.id
     }
 
+    /// Returns a description of the acquisition
     pub fn description(&self) -> &str {
         &self.description
     }
 
+    /// Returns a number representing the order in which the acquisition was acquired (0 being first).
     pub fn order_number(&self) -> i16 {
         self.order_number
     }
 
+    /// Returns the width of the acquired region (in pixels)
     pub fn width(&self) -> i32 {
         self.max_x
     }
 
+    /// Returns the height of the acquired region (in pixels)
     pub fn height(&self) -> i32 {
         self.max_y
     }
 
-    pub fn to_slide_transform(&self) -> AffineTransform<f64> {
-        let mut moving_points = Vec::new();
-        let mut fixed_points = Vec::new();
-
-        // There seems to be a bug where the start and end x pos is recorded as the same value
-        let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
-            true => {
-                self.roi_start_x_pos_um
-                    + (self.max_x as f64 * self.ablation_distance_between_shots_x)
-            }
-            false => self.roi_end_x_pos_um,
-        };
-
-        moving_points.push(Vector2::new(
-            self.roi_start_x_pos_um,
-            self.roi_start_y_pos_um,
-        ));
-        moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_start_y_pos_um));
-        moving_points.push(Vector2::new(self.roi_start_x_pos_um, self.roi_end_y_pos_um));
-        //moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_end_y_pos_um));
-
-        fixed_points.push(Vector2::new(0.0, 0.0));
-        fixed_points.push(Vector2::new(self.max_x as f64, 0.0));
-        //fixed_points.push(Vector2::new(0.0, self.max_y as f64));
-        fixed_points.push(Vector2::new(
-            0.0,
-            (self.roi_start_y_pos_um - self.roi_end_y_pos_um)
-                / self.ablation_distance_between_shots_y,
-        ));
-
-        //fixed_points.push(Vector2::new(self.max_x as f64, self.max_y as f64));
-
-        AffineTransform::from_points(moving_points, fixed_points)
+    /// Returns the ablation frequency
+    pub fn ablation_frequency(&self) -> f64 {
+        self.ablation_frequency
     }
 
-    pub fn slide_bounding_box(&self) -> BoundingBox<f64> {
-        // There seems to be a bug where the start and end x pos is recorded as the same value
-        let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
-            true => {
-                self.roi_start_x_pos_um
-                    + (self.max_x as f64 * self.ablation_distance_between_shots_x)
-            }
-            false => self.roi_end_x_pos_um,
-        };
-
-        BoundingBox {
-            min_x: f64::min(self.roi_start_x_pos_um, roi_end_x_pos_um),
-            min_y: f64::min(self.roi_start_y_pos_um, self.roi_end_y_pos_um),
-            width: (roi_end_x_pos_um - self.roi_start_x_pos_um).abs(),
-            height: (self.roi_end_y_pos_um - self.roi_start_y_pos_um).abs(),
-        }
+    /// Returns the region ID for the acquisition
+    pub fn acquisition_roi_id(&self) -> i16 {
+        self.acquisition_roi_id
     }
 
-    pub fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
+    fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
@@ -214,6 +177,7 @@ impl<T: Read + Seek> Acquisition<T> {
         reader.decode().unwrap()
     }
 
+    /// Returns the optical image of the acquisition region prior to ablation
     pub fn before_ablation_image(&self) -> RgbaImage {
         match self.dynamic_image(
             self.before_ablation_image_start_offset,
@@ -224,6 +188,7 @@ impl<T: Read + Seek> Acquisition<T> {
         }
     }
 
+    /// Returns the optical image of the acquisition region after ablation
     pub fn after_ablation_image(&self) -> RgbaImage {
         match self.dynamic_image(
             self.after_ablation_image_start_offset,
@@ -234,7 +199,8 @@ impl<T: Read + Seek> Acquisition<T> {
         }
     }
 
-    pub fn channels(&self) -> &Vec<AcquisitionChannel> {
+    /// Returns a list of all channels acquired within this acquisition
+    pub fn channels(&self) -> &[AcquisitionChannel] {
         &self.channels
     }
 
@@ -242,8 +208,8 @@ impl<T: Read + Seek> Acquisition<T> {
         &mut self.channels
     }
 
-    // Return whether the acquisition has run to completion (checks the size of the recorded data
-    // compared to the expected data size)
+    /// Returns whether the acquisition has run to completion (checks the size of the recorded data
+    /// compared to the expected data size)
     pub fn is_complete(&self) -> bool {
         let expected_size: usize = self.channels().len()
             * self.max_x as usize
@@ -256,10 +222,12 @@ impl<T: Read + Seek> Acquisition<T> {
         expected_size == measured_size
     }
 
+    /// Provides an iterator over all spectra (each pixel) within the acquisition
     pub fn spectra(&self) -> SpectrumIterator<T> {
         SpectrumIterator::new(self)
     }
 
+    /// Returns a spectrum at the specified (x, y) coordinate
     pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>, MCDError> {
         let index = y * self.max_x as usize + x;
 
@@ -289,11 +257,13 @@ impl<T: Read + Seek> Acquisition<T> {
         Ok(spectrum)
     }
 
+    /// Returns the size of a single spectrum in bytes
     #[inline]
     pub fn spectrum_size(&self) -> usize {
         self.channels().len() * self.value_bytes as usize
     }
 
+    /// Returns the number of spectra acquired as part of the acquisition
     #[inline]
     pub fn num_spectra(&self) -> usize {
         let measured_size: usize = self.data_end_offset as usize - self.data_start_offset as usize;
@@ -301,6 +271,8 @@ impl<T: Read + Seek> Acquisition<T> {
         measured_size / self.spectrum_size()
     }
 
+    /// Returns the ChannelImage for the channel matching the `ChannelIdentifier`. This contains the intensities of the channel
+    /// for each detected pixel, the number of valid pixels and the width and height of the image.
     pub fn channel_data(&self, identifier: &ChannelIdentifier) -> Result<ChannelImage, MCDError> {
         let channel = self.channel(identifier).unwrap();
         let mut data = vec![0.0f32; self.num_spectra()];
@@ -374,6 +346,7 @@ impl<T: Read + Seek> Acquisition<T> {
         })
     }
 
+    /// Returns the channel which matches the given identifier, or None if no match found
     pub fn channel(&self, identifier: &ChannelIdentifier) -> Option<&AcquisitionChannel> {
         for channel in &self.channels {
             match identifier {
@@ -383,12 +356,12 @@ impl<T: Read + Seek> Acquisition<T> {
                     }
                 }
                 ChannelIdentifier::Name(name) => {
-                    if &channel.name() == name {
+                    if channel.name() == name {
                         return Some(channel);
                     }
                 }
                 ChannelIdentifier::Label(label) => {
-                    if &channel.label() == label {
+                    if channel.label() == label {
                         return Some(channel);
                     }
                 }
@@ -396,6 +369,63 @@ impl<T: Read + Seek> Acquisition<T> {
         }
 
         None
+    }
+}
+
+impl<T: Seek + Read> OnSlide for Acquisition<T> {
+    /// Returns the affine transformation from pixel coordinates within the acquisition to to the slide coordinates (μm)
+    fn to_slide_transform(&self) -> AffineTransform<f64> {
+        let mut moving_points = Vec::new();
+        let mut fixed_points = Vec::new();
+
+        // There seems to be a bug where the start and end x pos is recorded as the same value
+        let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
+            true => {
+                self.roi_start_x_pos_um
+                    + (self.max_x as f64 * self.ablation_distance_between_shots_x)
+            }
+            false => self.roi_end_x_pos_um,
+        };
+
+        moving_points.push(Vector2::new(
+            self.roi_start_x_pos_um,
+            self.roi_start_y_pos_um,
+        ));
+        moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_start_y_pos_um));
+        moving_points.push(Vector2::new(self.roi_start_x_pos_um, self.roi_end_y_pos_um));
+        //moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_end_y_pos_um));
+
+        fixed_points.push(Vector2::new(0.0, 0.0));
+        fixed_points.push(Vector2::new(self.max_x as f64, 0.0));
+        //fixed_points.push(Vector2::new(0.0, self.max_y as f64));
+        fixed_points.push(Vector2::new(
+            0.0,
+            (self.roi_start_y_pos_um - self.roi_end_y_pos_um)
+                / self.ablation_distance_between_shots_y,
+        ));
+
+        //fixed_points.push(Vector2::new(self.max_x as f64, self.max_y as f64));
+
+        AffineTransform::from_points(moving_points, fixed_points)
+    }
+
+    /// Returns the bounding box encompasing the acquisition area on the slide (in μm)
+    fn slide_bounding_box(&self) -> BoundingBox<f64> {
+        // There seems to be a bug where the start and end x pos is recorded as the same value
+        let roi_end_x_pos_um = match self.roi_start_x_pos_um == self.roi_end_x_pos_um {
+            true => {
+                self.roi_start_x_pos_um
+                    + (self.max_x as f64 * self.ablation_distance_between_shots_x)
+            }
+            false => self.roi_end_x_pos_um,
+        };
+
+        BoundingBox {
+            min_x: f64::min(self.roi_start_x_pos_um, roi_end_x_pos_um),
+            min_y: f64::min(self.roi_start_y_pos_um, self.roi_end_y_pos_um),
+            width: (roi_end_x_pos_um - self.roi_start_x_pos_um).abs(),
+            height: (self.roi_end_y_pos_um - self.roi_start_y_pos_um).abs(),
+        }
     }
 }
 
