@@ -1,4 +1,3 @@
-#![feature(hash_set_entry)]
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
@@ -41,8 +40,9 @@ pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
 pub use self::slide::Slide;
 
+use std::convert::TryInto;
 use std::fmt;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -94,6 +94,22 @@ pub struct MCD<T: Seek + Read> {
     //acquisitions: HashMap<String, Arc<Acquisition>>,
     //acquisition_rois: Vec<AcquisitionROI>,
     //roi_points: Vec<ROIPoint>,
+}
+
+fn find_mcd_start(chunk: &[u8], chunk_size: usize) -> usize {
+    for start_index in 0..chunk_size {
+        if let Ok(_data) = std::str::from_utf8(&chunk[start_index..]) {
+            return start_index - 1;
+        }
+    }
+
+    0
+}
+
+fn u16_from_u8(a: &mut [u16], v: &[u8]) {
+    for i in 0..a.len() {
+        a[i] = (v[i * 2] as u16) | ((v[i * 2 + 1] as u16) << 8)
+    }
 }
 
 impl<T: Seek + Read> MCD<T> {
@@ -241,10 +257,13 @@ impl<T: Seek + Read> MCD<T> {
 
     /// Parse *.mcd format
     pub fn parse(reader: T, location: &str) -> Self {
-        let mcd = MCD::new(reader, location);
-        let mut parser = MCDParser::new(mcd);
+        let mut mcd = MCD::new(reader, location);
+        let combined_xml = mcd.xml();
 
-        let combined_xml = parser.get_xml();
+        let mut file = std::fs::File::create("tmp.xml").unwrap();
+        file.write_all(combined_xml.as_bytes()).unwrap();
+
+        let mut parser = MCDParser::new(mcd);
 
         let mut reader = quick_xml::Reader::from_str(&combined_xml);
         let mut buf = Vec::with_capacity(BUF_SIZE);
@@ -299,6 +318,56 @@ impl<T: Seek + Read> MCD<T> {
         convert::open(&mut mcd).unwrap();
 
         mcd
+    }
+
+    /// Returns the raw XML metadata stored in the .mcd file
+    pub fn xml(&mut self) -> String {
+        let chunk_size: i64 = 1000;
+        let mut cur_offset: i64 = 0;
+
+        let mut buf_u8 = vec![0; chunk_size.try_into().unwrap()];
+
+        loop {
+            let mut reader = self.reader.lock().unwrap();
+
+            reader
+                .seek(SeekFrom::End(-cur_offset - chunk_size))
+                .unwrap();
+
+            reader.read_exact(&mut buf_u8).unwrap();
+
+            match std::str::from_utf8(&buf_u8) {
+                Ok(_data) => {}
+                Err(_error) => {
+                    // Found the final chunk, so find the start point
+                    let start_index = find_mcd_start(&buf_u8, chunk_size.try_into().unwrap());
+
+                    let total_size = cur_offset + chunk_size - (start_index as i64);
+                    buf_u8 = vec![0; total_size.try_into().unwrap()];
+
+                    reader.seek(SeekFrom::End(-total_size)).unwrap();
+                    reader.read_exact(&mut buf_u8).unwrap();
+
+                    break;
+                }
+            }
+
+            cur_offset += chunk_size;
+        }
+
+        let mut combined_xml = String::new();
+
+        let mut buf_u16: Vec<u16> = vec![0; buf_u8.len() / 2];
+        u16_from_u8(&mut buf_u16, &buf_u8);
+
+        match String::from_utf16(&buf_u16) {
+            Ok(data) => combined_xml.push_str(&data),
+            Err(error) => {
+                println!("{}", error)
+            }
+        }
+
+        combined_xml
     }
 }
 
@@ -406,267 +475,40 @@ impl ChannelImage {
 
 #[cfg(test)]
 mod tests {
-    use image::{ImageBuffer, Pixel, Rgba};
-
     use super::*;
 
-    use core::panic;
     use std::fs::File;
-    use std::time::Instant;
 
     use std::io::BufReader;
 
     #[test]
-    fn it_works() -> std::io::Result<()> {
-        let start = Instant::now();
-        //let filename = "/home/alan/Documents/Work/IMC/set1.mcd";
-        let filename =
-        //    "/media/alan/Seagate Portable Drive/AZ/Gemcitabine/20181002_IMC_Gemcitabine_testpanel.mcd";
-            "/home/alan/Documents/Nicole/Salmonella/2019-10-25_Salmonella_final_VS+WT.mcd";
+    fn test_all_in_folder() -> std::io::Result<()> {
+        let paths = std::fs::read_dir("../test/").unwrap();
 
-        let duration = start.elapsed();
+        for path in paths {
+            let path = path?;
 
-        //while parser.has_errors() {
-        //    println!("{}", parser.pop_error_front().unwrap());
-        //}
+            let file = BufReader::new(File::open(path.path()).unwrap());
+            let mut mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap());
 
-        let file = BufReader::new(File::open(filename).unwrap());
-        let mcd = MCD::parse_with_dcm(file, filename);
+            let xml = mcd.xml();
 
-        //println!("{:?}", mcd.slide);
-        //println!("{:?}", mcd.panoramas);
-        //for (id, acquisition) in &mcd.acquisitions {
-        //    println!("{:?}: {:?}", id, acquisition);
-        //}
-        //println!("{:?}", mcd.acquisitions[0]);
-        //println!("{:?}", mcd.roi_points[0]);
-        //std::fs::write("tmp.xml", combined_xml).expect("Unable to write file");
+            println!("{}", xml);
 
-        //std::fs::write("tmp.png", mcd.panoramas.get("8").unwrap().get_image(&mut file).unwrap())
-        //    .expect("Unable to write file");
-
-        println!("Time elapsed when parsing is: {:?}", duration);
-
-        /*let acquisition = mcd
-            .get_slide(&1)
-            .unwrap()
-            .get_panorama(&3)
-            .unwrap()
-            .get_acquisition(&1)
-            .unwrap();
-        println!("{}", acquisition);
-        let point = acquisition.to_slide_transform().transform_point(1.0, 1.0);
-        println!("Transformed point = {:?}", point);
-
-
-        println!("Bounding box = {:?}", acquisition.slide_bounding_box());
-
-        std::fs::write("tmp.png", acquisition.get_after_ablation_image().unwrap())
-            .expect("Unable to write file");*/
-
-        let _slide = mcd.slide(1).unwrap();
-
-        //convert::convert(&mcd)?;
-
-        //println!("{:?}", mcd);
-
-        //return Ok(());
-
-        //std::fs::write("slide.jpeg", slide.get_image().unwrap())
-        //    .expect("Unable to write file");
-
-        /*
-
-        let offset_x = (bounding_box.min_x / 10.0).round() as u32;
-        let offset_y = ((25000.0 - bounding_box.min_y - bounding_box.height) / 10.0).round() as u32;
-        let width = (bounding_box.width / 10.0).round() as u32;
-        let height = (bounding_box.height / 10.0).round() as u32;
-
-        let panorama_image = panorama_image.resize_exact(width, height, FilterType::Nearest).to_rgb8();
-
-        if offset_x + width > 7500 || offset_y + height > 2500 {
-            continue;
-        }
-
-        for y in 0..height {
-            for x in 0..width {
-                resized_image.put_pixel(offset_x + x, offset_y + y, *panorama_image.get_pixel(x, y));
-            }
-        }*/
-
-        //panorama_image.resize_exact()
-
-        //let transform = panorama.to_slide_transform();
-
-        let output_location = "/home/alan/Documents/Nicole/Salmonella/";
-        let _path = std::path::Path::new(output_location);
-
-        for acquisition in mcd.acquisitions() {
-            println!("[{}] {}", acquisition.id(), acquisition.description());
-        }
-
-        let acquisition = mcd
-            .acquisition(&AcquisitionIdentifier::Description("ROI 10".to_string()))
-            .unwrap();
-
-        let x_channel = acquisition
-            .channel_data(&ChannelIdentifier::Name("X".to_string()))
-            .unwrap();
-
-        println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
-
-        for channel in acquisition.channels() {
-            println!("[{}] {}", channel.label(), channel.name());
-        }
-
-        let data = acquisition
-            .channel_data(&ChannelIdentifier::Label("Ki67_B56".to_string()))
-            .unwrap();
-
-        let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
-            ImageBuffer::new(data.width as u32, data.height as u32);
-
-        let mut index = 0;
-        let max_value = 20.0;
-        for y in 0..data.height {
-            if index >= data.valid_pixels {
-                break;
+            for acquisition in mcd.acquisitions() {
+                println!("[{}] {}", acquisition.id(), acquisition.description());
             }
 
-            for x in 0..data.width {
-                if index >= data.valid_pixels {
-                    break;
-                }
-
-                let g = ((data.data[index] / max_value) * 255.0) as u8;
-                let g = g as f64 / 255.0;
-
-                let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
-                cur_pixel[1] = (g * 255.0) as u8;
-                cur_pixel[3] = 255;
-
-                index += 1;
-            }
-        }
-
-        acq_image.save("ki67.png").unwrap();
-
-        //let cell_data = halo::parse_from_path("/home/alan/Documents/Nicole/Object data for phenotype correlation/VS_object data_final.csv")?;
-
-        let positive_header = cell_data.header("Ki67_B56(Dy162Di) Positive").unwrap();
-        let positive_cell = cell_data
-            .column_data(positive_header.column_number())
-            .unwrap();
-
-        let positive_cell = match positive_cell {
-            halo::ColumnData::Binary(data) => data,
-            _ => {
-                panic!("Wrong type of data in cell?");
-            }
-        };
-
-        for (index, boundary) in cell_data.boundaries().enumerate() {
-            //println!("[{}] {:?}", index, boundary);
-
-            if positive_cell[index] {
-                for y in [0, boundary.height] {
-                    for x in 0..boundary.width {
-                        let x = x + boundary.min_x;
-                        let y = y + boundary.min_y;
-
-                        if x < 0 || y < 0 || x >= data.width.into() || y >= data.height.into() {
-                            continue;
-                        }
-
-                        let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
-                        cur_pixel[0] = 255.0 as u8;
-                    }
-                }
-
-                for x in [0, boundary.width] {
-                    for y in 0..boundary.height {
-                        let x = x + boundary.min_x;
-                        let y = y + boundary.min_y;
-
-                        if x < 0 || y < 0 || x >= data.width.into() || y >= data.height.into() {
-                            continue;
-                        }
-
-                        let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
-                        cur_pixel[0] = 255.0 as u8;
-                    }
-                }
-            }
-
-            /*if index > 10 {
-                break;
-            }*/
-        }
-
-        acq_image.save("ki67_with_markers.png").unwrap();
-
-        /*for panorama in slide.panoramas() {
-            let panorama_image = panorama.image();
-            panorama_image
-                .save(path.join(format!("{}.png", panorama.description())))
+            let acquisition = mcd
+                .acquisition(&AcquisitionIdentifier::Description("ROI 10".to_string()))
                 .unwrap();
 
-            for acquisition in panorama.acquisitions() {
-                let acquisition_image = acquisition.before_ablation_image();
-                acquisition_image
-                    .save(format!(
-                        "{}_{}.png",
-                        panorama.description(),
-                        acquisition.description()
-                    ))
-                    .unwrap();
+            let x_channel = acquisition
+                .channel_data(&ChannelIdentifier::Name("X".to_string()))
+                .unwrap();
 
-                let cur_path = path.join(format!(
-                    "{}_{}.txt",
-                    panorama.description(),
-                    acquisition.description()
-                ));
-                let mut f = File::create(cur_path).expect("Unable to create file");
-
-                let transform = acquisition.to_slide_transform();
-                let transform = transform.to_slide_matrix();
-                writeln!(f, "{},{}", acquisition.width(), acquisition.height())?;
-                writeln!(
-                    f,
-                    "{},{},{},{},{},{}",
-                    transform.m11,
-                    transform.m12,
-                    transform.m13,
-                    transform.m21,
-                    transform.m22,
-                    transform.m23
-                )?;
-            }
-        }*/
-
-        //let resized_image = slide.create_overview_image(15000);
-        //resized_image
-        //    .save(path.join("slide_overview.jpeg"))
-        //    .unwrap();
-
-        /*
-        let mut points = Vec::new();
-        points.push(Vector2::new(20.0, 10.0));
-        points.push(Vector2::new(20.0, 20.0));
-        points.push(Vector2::new(40.0, 10.0));
-        //points.push(Vector2::new(40.0, 20.0));
-        //points.push(Vector3::new(20.0, 10.0, 0.0));
-
-        let mut points2 = Vec::new();
-        points2.push(Vector2::new(40.0, 5.0));
-        points2.push(Vector2::new(40.0, 10.0));
-        points2.push(Vector2::new(80.0, 5.0));
-        //points2.push(Vector2::new(80.0, 10.0));
-        //points2.push(Vector3::new(20.0, 10.0, 0.0));
-
-        let transform = AffineTransform::from_points(points, points2);*/
-
-        //println!("{}", combined_xml);
+            println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
+        }
 
         Ok(())
     }

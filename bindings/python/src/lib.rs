@@ -1,18 +1,22 @@
+#![warn(missing_docs)]
+#![warn(rustdoc::missing_doc_code_examples)]
+
 //! python bindings for imc-rs, a library for accessing imaging mass cytometry data.
 
 use imc_rs::ChannelIdentifier;
 use imc_rs::HasOpticalImage;
+use numpy::ndarray::Array;
 use numpy::PyArray2;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 
 // For passing back images/data
-use ndarray::Array;
 use numpy::{IntoPyArray, PyArray3};
 
 use std::fs::File;
 use std::sync::Arc;
 
+/// Mcd represents an .mcd file
 #[pyclass]
 struct Mcd {
     mcd: Arc<imc_rs::MCD<std::fs::File>>,
@@ -20,6 +24,7 @@ struct Mcd {
 
 #[pymethods]
 impl Mcd {
+    /// Parse an .mcd file, returning an object providing access to IMC data and accompanying metadata
     #[staticmethod]
     pub fn parse(filename: &str) -> PyResult<Self> {
         let file = match File::open(filename) {
@@ -32,6 +37,8 @@ impl Mcd {
         Ok(Mcd { mcd: Arc::new(mcd) })
     }
 
+    /// Parse an .mcd file, generating a temporary file for fast channel image access if one is not present, and
+    /// returning an object providing access to IMC data and accompanying metadata
     #[staticmethod]
     pub fn parse_with_dcm(filename: &str) -> PyResult<Self> {
         let file = match File::open(filename) {
@@ -44,27 +51,25 @@ impl Mcd {
         Ok(Mcd { mcd: Arc::new(mcd) })
     }
 
+    /// Returns the number of slides in the .mcd data
     pub fn num_slides(&self) -> PyResult<usize> {
         Ok(self.mcd.slide_ids().len())
     }
 
+    /// Returns a list of IDs for each slide in the .mcd data
     pub fn slide_ids(&self) -> PyResult<Vec<u16>> {
         Ok(self.mcd.slide_ids())
     }
 
-    pub fn slide(&self, id: u16) -> PyResult<Slide> {
-        match self.mcd.slide(id) {
-            Some(_) => Ok(Slide {
-                mcd: self.mcd.clone(),
-                id,
-            }),
-            None => Err(PyErr::new::<exceptions::PyValueError, _>(format!(
-                "No such slide with id {}",
-                id
-            ))),
-        }
+    /// Returns the slide with the given ID, or None if none exists
+    pub fn slide(&self, id: u16) -> Option<Slide> {
+        self.mcd.slide(id).map(|_| Slide {
+            mcd: self.mcd.clone(),
+            id,
+        })
     }
 
+    /// Returns a sorted list of panorama IDs
     pub fn panorama_ids(&self) -> PyResult<Vec<u16>> {
         let mut ids = Vec::new();
 
@@ -182,14 +187,14 @@ impl Slide {
         Ok(self.id)
     }
 
-    pub fn uid(&self) -> PyResult<String> {
+    /*pub fn uid(&self) -> PyResult<String> {
         Ok(self
             .mcd
             .slide(self.id)
             .expect("Slide ID was checked to exist during creation")
             .uid()
             .to_owned())
-    }
+    }*/
 
     pub fn description(&self) -> PyResult<String> {
         Ok(self
@@ -460,6 +465,30 @@ impl Acquisition {
     }
 }
 
+/// A Python module for reading and processing imaging mass cytometry data (stored in .mcd format).
+///
+/// # Quick start
+///
+/// >>> import pyimc
+/// >>> data = pyimc.Mcd.parse_with_dcm("/path/to/data.mcd")
+///
+/// The above will generate a temporary file, which stores the acquisition data image-wise. This is
+/// helpful when needing to access multiple images in a session as it significantly reduces the time
+/// required to load a single image. The temporary file is stored in the same location as the .mcd file
+/// and is only generated once. On the next call to `parse_with_dcm` no new file will be generated,
+/// unless the existing temporary file is deleted. The temporary file is approximately 1/3 as large as the
+/// .mcd file, but reduces the time required to read in a single channel image >200x.
+///
+/// To load the data without generating a temporary file (and reading the data spectrum-wise), use the
+/// following command:
+///
+/// >>> import pyimc
+/// >>> data = pyimc.Mcd.parse("/path/to/data.mcd")
+///
+///
+/// Can generate a slide image helpful in whole slide imaging registration.
+///
+/// Also includes methods for reading in cell segmentation data produced by HALO (stored as .csv).
 #[pymodule]
 fn pyimc(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Mcd>()?;

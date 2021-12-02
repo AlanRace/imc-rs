@@ -23,7 +23,8 @@ pub struct Slide<T: Seek + Read> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
 
     id: u16,
-    uid: String,
+    // The newer version of the XSD doesn't have a UID field anymore
+    uid: Option<String>,
     description: String,
     filename: String,
     slide_type: String,
@@ -45,7 +46,7 @@ impl<T: Seek + Read> From<SlideXML> for Slide<T> {
             reader: None,
 
             id: slide.id.unwrap(),
-            uid: slide.uid.unwrap(),
+            uid: slide.uid,
             description: slide.description.unwrap(),
             filename: slide.filename.unwrap(),
             slide_type: slide.slide_type.unwrap(),
@@ -68,8 +69,11 @@ impl<T: Seek + Read> Slide<T> {
     }
 
     /// Returns the slide UID
-    pub fn uid(&self) -> &str {
-        &self.uid
+    pub fn uid(&self) -> Option<&str> {
+        match &self.uid {
+            Some(uid) => Some(uid),
+            None => None,
+        }
     }
 
     /// Returns the description given to the slide
@@ -315,14 +319,18 @@ impl<T: Seek + Read> Print for Slide<T> {
             self.id,
             indent = indent
         )?;
-        writeln!(
-            writer,
-            "{:indent$}{: <16} | {}",
-            "",
-            "UID",
-            self.uid,
-            indent = indent
-        )?;
+
+        if let Some(uid) = &self.uid {
+                writeln!(
+                    writer,
+                    "{:indent$}{: <16} | {}",
+                    "",
+                    "UID",
+                    uid,
+                    indent = indent
+                )?;
+        }
+
         writeln!(
             writer,
             "{:indent$}{: <16} | {}",
