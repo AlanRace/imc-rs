@@ -38,6 +38,11 @@ pub enum AcquisitionIdentifier {
     Description(String),
 }
 
+#[derive(Debug)]
+pub enum ProfilingType {
+    Global,
+}
+
 /// Acquisition represents a single region analysed by IMC.
 #[derive(Debug)]
 pub struct Acquisition<T: Read + Seek> {
@@ -74,6 +79,8 @@ pub struct Acquisition<T: Read + Seek> {
     plume_start: i32,
     plume_end: i32,
     template: String,
+
+    profiling_type: Option<ProfilingType>,
 
     channels: Vec<AcquisitionChannel>,
 }
@@ -370,6 +377,18 @@ impl<T: Read + Seek> Acquisition<T> {
 
         None
     }
+
+    pub(crate) fn fix_roi_start_pos(&mut self) {
+        // In version 2 of the schema, it seems like ROIStartXPosUm and ROIStartYPosUm are 1000x what they should be, so try and detect this and correct for it
+        if self.roi_start_x_pos_um > 75000.0 {
+            self.roi_start_x_pos_um /= 1000.0;
+        }
+
+        // In version 2 of the schema, it seems like ROIStartXPosUm and ROIStartYPosUm are 1000x what they should be, so try and detect this and correct for it
+        if self.roi_start_y_pos_um > 75000.0 {
+            self.roi_start_y_pos_um /= 1000.0;
+        }
+    }
 }
 
 impl<T: Seek + Read> OnSlide for Acquisition<T> {
@@ -389,10 +408,16 @@ impl<T: Seek + Read> OnSlide for Acquisition<T> {
 
         moving_points.push(Vector2::new(
             self.roi_start_x_pos_um,
-            self.roi_start_y_pos_um,
+            25000.0 - self.roi_start_y_pos_um,
         ));
-        moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_start_y_pos_um));
-        moving_points.push(Vector2::new(self.roi_start_x_pos_um, self.roi_end_y_pos_um));
+        moving_points.push(Vector2::new(
+            roi_end_x_pos_um,
+            25000.0 - self.roi_start_y_pos_um,
+        ));
+        moving_points.push(Vector2::new(
+            self.roi_start_x_pos_um,
+            25000.0 - self.roi_end_y_pos_um,
+        ));
         //moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_end_y_pos_um));
 
         fixed_points.push(Vector2::new(0.0, 0.0));
@@ -617,6 +642,8 @@ impl<T: Seek + Read> From<AcquisitionXML> for Acquisition<T> {
             plume_start: acquisition.plume_start.unwrap(),
             plume_end: acquisition.plume_end.unwrap(),
             template: acquisition.template.unwrap(),
+
+            profiling_type: acquisition.profiling_type,
 
             channels: Vec::new(),
         }

@@ -73,10 +73,17 @@ impl Drop for TemporaryFile {
 impl Seek for TemporaryFile {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match &mut self.mode {
-            Mode::None => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Can't seek unless we decide to read or write",
-            )),
+            Mode::None => {
+                if let SeekFrom::Start(pos) = pos {
+                    if pos == 0 {
+                        return Ok(0);
+                    }
+                }
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "Can't seek unless we decide to read or write",
+                ))
+            }
             Mode::Reading(reader) => reader.seek(pos),
             Mode::Writing(writer) => writer.seek(pos),
         }

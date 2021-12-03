@@ -27,6 +27,7 @@ pub(crate) mod mcd;
 mod transform;
 
 mod acquisition;
+mod calibration;
 mod channel;
 mod images;
 mod panorama;
@@ -64,7 +65,9 @@ pub trait Print {
 }
 
 /// Represents property of having an optical image
-pub trait HasOpticalImage {
+pub trait OpticalImage {
+    /// Returns whether an optical image is present
+    fn has_image(&self) -> bool;
     /// Returns the binary data for the image, exactly as stored in the .mcd file
     fn image_data(&self) -> Result<Vec<u8>, std::io::Error>;
     /// Returns the format of the stored optical image
@@ -488,19 +491,28 @@ mod tests {
         for path in paths {
             let path = path?;
 
+            if path.path().extension().unwrap() != "mcd" {
+                println!("Skipping {:?} file.", path.path().extension().unwrap());
+                continue;
+            }
+
             let file = BufReader::new(File::open(path.path()).unwrap());
             let mut mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap());
 
             let xml = mcd.xml();
 
-            println!("{}", xml);
+            //println!("{}", xml);
 
             for acquisition in mcd.acquisitions() {
                 println!("[{}] {}", acquisition.id(), acquisition.description());
             }
 
+            let acquisition = mcd.acquisitions()[0];
+
             let acquisition = mcd
-                .acquisition(&AcquisitionIdentifier::Description("ROI 10".to_string()))
+                .acquisition(&AcquisitionIdentifier::Description(
+                    acquisition.description().to_string(),
+                ))
                 .unwrap();
 
             let x_channel = acquisition
@@ -508,6 +520,22 @@ mod tests {
                 .unwrap();
 
             println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
+
+            for channel in acquisition.channels() {
+                println!(
+                    "[Channel {}] {} | {}",
+                    channel.id(),
+                    channel.label(),
+                    channel.name()
+                );
+            }
+
+            let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
+            let overview_image = mcd.slides()[0]
+                .create_overview_image(15000, Some((&channel_identifier, Some(100.0))))
+                .unwrap();
+
+            overview_image.save("overview.png").unwrap();
         }
 
         Ok(())

@@ -11,8 +11,15 @@ use nalgebra::Vector2;
 
 use crate::{
     images::read_image_data, mcd::PanoramaXML, transform::AffineTransform, Acquisition,
-    BoundingBox, HasOpticalImage, OnSlide, Print,
+    BoundingBox, OnSlide, OpticalImage, Print,
 };
+
+#[derive(Debug)]
+pub enum PanoramaType {
+    Default,
+    Imported,
+    Instrument,
+}
 
 /// Represents a panorama (containing one or more acquisitions)
 #[derive(Debug)]
@@ -37,6 +44,10 @@ pub struct Panorama<T: Seek + Read> {
     pixel_height: i64,
     image_format: ImageFormat,
     pixel_scale_coef: f64,
+
+    panorama_type: Option<PanoramaType>,
+    is_locked: Option<bool>,
+    rotation_angle: Option<u16>,
 
     acquisitions: HashMap<u16, Acquisition<T>>,
 }
@@ -109,9 +120,21 @@ impl<T: Seek + Read> Panorama<T> {
         reader.set_format(ImageFormat::Png);
         reader.decode().unwrap()
     }
+
+    pub(crate) fn fix_image_dimensions(&mut self) {
+        if self.has_image() && (self.pixel_width == 0 || self.pixel_height == 0) {
+            let image = self.image();
+            self.pixel_width = image.width() as i64;
+            self.pixel_height = image.height() as i64;
+        }
+    }
 }
 
-impl<T: Seek + Read> HasOpticalImage for Panorama<T> {
+impl<T: Seek + Read> OpticalImage for Panorama<T> {
+    fn has_image(&self) -> bool {
+        (self.image_end_offset - self.image_start_offset) > 0
+    }
+
     /// Returns the format that the panorama image is stored in
     fn image_format(&self) -> ImageFormat {
         self.image_format
@@ -182,17 +205,26 @@ impl<T: Seek + Read> OnSlide for Panorama<T> {
         let mut moving_points = Vec::new();
         let mut fixed_points = Vec::new();
 
-        moving_points.push(Vector2::new(self.slide_x1_pos_um, self.slide_y1_pos_um));
-        moving_points.push(Vector2::new(self.slide_x2_pos_um, self.slide_y2_pos_um));
-        moving_points.push(Vector2::new(self.slide_x3_pos_um, self.slide_y3_pos_um));
+        moving_points.push(Vector2::new(
+            self.slide_x1_pos_um,
+            25000.0 - self.slide_y1_pos_um,
+        ));
+        moving_points.push(Vector2::new(
+            self.slide_x2_pos_um,
+            25000.0 - self.slide_y2_pos_um,
+        ));
+        moving_points.push(Vector2::new(
+            self.slide_x3_pos_um,
+            25000.0 - self.slide_y3_pos_um,
+        ));
         //moving_points.push(Vector2::new(self.slide_x4_pos_um, self.slide_y4_pos_um));
 
-        fixed_points.push(Vector2::new(0.0, 0.0));
-        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
+        fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
         fixed_points.push(Vector2::new(
             self.pixel_width as f64,
             self.pixel_height as f64,
         ));
+        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
         //fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
 
         AffineTransform::from_points(moving_points, fixed_points)
@@ -313,6 +345,10 @@ impl<T: Seek + Read> From<PanoramaXML> for Panorama<T> {
             pixel_height: panorama.pixel_height.unwrap(),
             image_format: panorama.image_format.unwrap(),
             pixel_scale_coef: panorama.pixel_scale_coef.unwrap(),
+
+            panorama_type: panorama.panorama_type,
+            is_locked: panorama.is_locked,
+            rotation_angle: panorama.rotation_angle,
 
             acquisitions: HashMap::new(),
         }

@@ -11,8 +11,11 @@ use image::{
 use image::{io::Reader as ImageReader, Pixel};
 
 use crate::{
-    channel::ChannelIdentifier, error::MCDError, images::read_image_data, HasOpticalImage, OnSlide,
-    Panorama, Print,
+    channel::ChannelIdentifier,
+    error::MCDError,
+    images::read_image_data,
+    mcd::{SlideFiducialMarksXML, SlideProfileXML},
+    OnSlide, OpticalImage, Panorama, Print,
 };
 
 use crate::mcd::SlideXML;
@@ -35,6 +38,13 @@ pub struct Slide<T: Seek + Read> {
     image_end_offset: i64,
     image_file: String,
 
+    // New terms in version 2 of the XSD are included as optional
+    energy_db: Option<u32>,
+    frequency: Option<u32>,
+    fmark_slide_length: Option<u64>,
+    fmark_slide_thickness: Option<u64>,
+    name: Option<String>,
+
     sw_version: String,
 
     panoramas: HashMap<u16, Panorama<T>>,
@@ -56,6 +66,12 @@ impl<T: Seek + Read> From<SlideXML> for Slide<T> {
             image_end_offset: slide.image_end_offset.unwrap(),
             image_file: slide.image_file.unwrap(),
             sw_version: slide.sw_version.unwrap(),
+
+            energy_db: slide.energy_db,
+            frequency: slide.frequency,
+            fmark_slide_length: slide.fmark_slide_length,
+            fmark_slide_thickness: slide.fmark_slide_thickness,
+            name: slide.name,
 
             panoramas: HashMap::new(),
         }
@@ -119,7 +135,11 @@ impl<T: Seek + Read> Slide<T> {
 
     fn dynamic_image(&self) -> DynamicImage {
         let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
-        reader.set_format(ImageFormat::Jpeg);
+        if self.software_version().starts_with('6') {
+            reader.set_format(ImageFormat::Jpeg);
+        } else {
+            reader.set_format(ImageFormat::Png);
+        }
         reader.decode().unwrap()
     }
 
@@ -171,28 +191,73 @@ impl<T: Seek + Read> Slide<T> {
         let scale = 75000.0 / width as f64;
 
         for panorama in self.panoramas() {
-            let panorama_image = panorama.image();
+            if panorama.has_image() {
+                let panorama_image = panorama.image();
 
-            //let panorama_image = panorama_image.to_rgba8();
+                //let panorama_image = panorama_image.to_rgba8();
 
-            //let bounding_box = panorama.slide_bounding_box();
-            let transform = panorama.to_slide_transform();
+                //let bounding_box = panorama.slide_bounding_box();
+                let transform = panorama.to_slide_transform();
 
-            //println!("[Panorama] Bounding box = {:?}", bounding_box);
-            //println!("[Panorama] Transform = {:?}", transform);
+                //println!("[Panorama] Bounding box = {:?}", bounding_box);
+                //println!("[Panorama] Transform = {:?}", transform);
 
-            for y in 0..panorama_image.height() {
-                for x in 0..panorama_image.width() {
-                    let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
+                let (width, height) = panorama.dimensions();
 
-                    let pixel = *panorama_image.get_pixel(x, y);
+                // Transform each coordinate
+                let top_left = transform.transform_to_slide(0.0, 0.0).unwrap();
+                let top_right = transform.transform_to_slide(width as f64, 0.0).unwrap();
+                let bottom_left = transform.transform_to_slide(0.0, height as f64).unwrap();
+                let bottom_right = transform
+                    .transform_to_slide(width as f64, height as f64)
+                    .unwrap();
 
-                    resized_image.put_pixel(
-                        (new_point[0] / scale).round() as u32,
-                        ((self.height_um - new_point[1]) / scale).round() as u32,
-                        pixel,
-                    );
+                let min_x = top_left[0].min(top_right[0].min(bottom_left[0].min(bottom_right[0])));
+                let min_y = top_left[1].min(top_right[1].min(bottom_left[1].min(bottom_right[1])));
+                let max_x = top_left[0].max(top_right[0].max(bottom_left[0].max(bottom_right[0])));
+                let max_y = top_left[1].max(top_right[1].max(bottom_left[1].max(bottom_right[1])));
+
+                let min_x_pixel = (min_x / scale).floor() as u32;
+                let max_x_pixel = (max_x / scale).floor() as u32;
+                let min_y_pixel = (min_y / scale).floor() as u32;
+                let max_y_pixel = (max_y / scale).floor() as u32;
+
+                for y in min_y_pixel..max_y_pixel {
+                    for x in min_x_pixel..max_x_pixel {
+                        let new_point = transform
+                            .transform_from_slide(x as f64 * scale, y as f64 * scale)
+                            .unwrap();
+
+                        let pixel_x = new_point[0].round() as i32;
+                        let pixel_y = height as i32 - new_point[1].round() as i32;
+
+                        if pixel_x < 0
+                            || pixel_y < 0
+                            || pixel_x >= width as i32
+                            || pixel_y >= height as i32
+                        {
+                            continue;
+                        }
+
+                        let pixel = *panorama_image.get_pixel(pixel_x as u32, pixel_y as u32);
+
+                        resized_image.put_pixel(x, y, pixel);
+                    }
                 }
+
+                /*for y in 0..panorama_image.height() {
+                    for x in 0..panorama_image.width() {
+                        let new_point = transform.transform_to_slide(x as f64, y as f64).unwrap();
+
+                        let pixel = *panorama_image.get_pixel(x, y);
+
+                        resized_image.put_pixel(
+                            (new_point[0] / scale).round() as u32,
+                            ((self.height_um - new_point[1]) / scale).round() as u32,
+                            pixel,
+                        );
+                    }
+                }*/
             }
 
             if let Some((identifier, max_value)) = channel_to_show {
@@ -240,7 +305,7 @@ impl<T: Seek + Read> Slide<T> {
                             let current_pixel = resized_image
                                 .get_pixel_mut(
                                     (new_point[0] / scale).round() as u32,
-                                    ((self.height_um - new_point[1]) / scale).round() as u32,
+                                    ((new_point[1]) / scale).round() as u32,
                                 )
                                 .channels_mut();
 
@@ -402,5 +467,41 @@ impl<T: Seek + Read> Print for Slide<T> {
 impl<T: Seek + Read> fmt::Display for Slide<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
+    }
+}
+
+pub struct SlideFiducialMarks {
+    id: u16,
+    slide_id: u16,
+    coordinate_x: u32,
+    coordinate_y: u32,
+}
+
+impl From<SlideFiducialMarksXML> for SlideFiducialMarks {
+    fn from(fiducial_marks: SlideFiducialMarksXML) -> Self {
+        SlideFiducialMarks {
+            id: fiducial_marks.id.unwrap(),
+            slide_id: fiducial_marks.slide_id.unwrap(),
+            coordinate_x: fiducial_marks.coordinate_x.unwrap(),
+            coordinate_y: fiducial_marks.coordinate_y.unwrap(),
+        }
+    }
+}
+
+pub struct SlideProfile {
+    id: u16,
+    slide_id: u16,
+    coordinate_x: u32,
+    coordinate_y: u32,
+}
+
+impl From<SlideProfileXML> for SlideProfile {
+    fn from(profile: SlideProfileXML) -> Self {
+        SlideProfile {
+            id: profile.id.unwrap(),
+            slide_id: profile.slide_id.unwrap(),
+            coordinate_x: profile.coordinate_x.unwrap(),
+            coordinate_y: profile.coordinate_y.unwrap(),
+        }
     }
 }

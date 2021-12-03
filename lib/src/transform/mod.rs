@@ -5,7 +5,7 @@ use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector2, Vector3, QR};
 #[derive(Debug)]
 pub enum Direction {
     ToSlide,
-    //FromSlide,
+    FromSlide,
 }
 
 // Create a trait which captures necessary traits for matrix multiplication
@@ -38,7 +38,7 @@ where
     direction: Direction,
 
     matrix: Matrix3<T>,
-    //    inv_matix: Option<Matrix3<T>>,
+    inv_matix: Option<Matrix3<T>>,
 }
 
 fn to_dmatrix<T>(points: Vec<Vector2<T>>) -> DMatrix<T>
@@ -75,8 +75,8 @@ where
         let moving = to_dmatrix(moving_points);
         let fixed = to_dmatrix(fixed_points);
 
-        //println!("{:?}", moving);
-        //println!("{:?}", fixed);
+        println!("{:?}", moving);
+        println!("{:?}", fixed);
         //println!("{:?}", moving.dot(&fixed));
 
         let qr = QR::new(fixed); //.lu();
@@ -98,23 +98,40 @@ where
         matrix.m33 = T::one();
 
         //println!("{:?}", matrix);
+        let inv_matrix = matrix.try_inverse();
 
         AffineTransform {
             direction: Direction::ToSlide,
             matrix,
-            //            inv_matix: None,
+            inv_matix: inv_matrix,
         }
     }
 
-    /*fn get_inv_matrix(&self) -> &Matrix3<T> {
+    /*fn inverse_transform(&self) -> AffineTransform<T> {
         // TODO: invert the matrix if necessary
-        &self.matrix
+        let direction = match self.direction {
+            Direction::ToSlide => Direction::FromSlide,
+            Direction::FromSlide => Direction::ToSlide,
+        };
+
+        AffineTransform {
+            direction,
+            matrix: self.inv_matix.clone(),
+            inv_matix: self.matrix.clone(),
+        }
     }*/
 
     pub fn to_slide_matrix(&self) -> &Matrix3<T> {
         match self.direction {
             Direction::ToSlide => &self.matrix,
-            //     Direction::FromSlide => self.get_inv_matrix(),
+            Direction::FromSlide => self.inv_matix.as_ref().unwrap(),
+        }
+    }
+
+    pub fn from_slide_matrix(&self) -> &Matrix3<T> {
+        match self.direction {
+            Direction::ToSlide => self.inv_matix.as_ref().unwrap(),
+            Direction::FromSlide => &self.matrix,
         }
     }
 
@@ -128,6 +145,13 @@ where
     pub fn transform_to_slide(&self, x: T, y: T) -> Option<Vector3<T>> {
         let point = Vector3::new(x, y, T::one());
         let point = self.to_slide_matrix() * point;
+
+        Some(point)
+    }
+
+    pub fn transform_from_slide(&self, x: T, y: T) -> Option<Vector3<T>> {
+        let point = Vector3::new(x, y, T::one());
+        let point = self.from_slide_matrix() * point;
 
         Some(point)
     }

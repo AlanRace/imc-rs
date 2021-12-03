@@ -2,11 +2,19 @@ use std::collections::HashMap;
 
 use quick_xml::events::Event;
 
-use crate::acquisition::DataFormat;
+use crate::{
+    acquisition::{DataFormat, ProfilingType},
+    calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams},
+    panorama::PanoramaType,
+    slide::{SlideFiducialMarks, SlideProfile},
+    OpticalImage,
+};
 
 use super::{
+    xml_types::{CalibrationFinalXML, CalibrationParamsXML, CalibrationXML},
     Acquisition, AcquisitionChannel, AcquisitionChannelXML, AcquisitionROI, AcquisitionXML,
-    ImageFormat, Panorama, PanoramaXML, ROIPoint, ROIType, SlideXML, MCD,
+    CalibrationChannelXML, ImageFormat, Panorama, PanoramaXML, ROIPoint, ROIType,
+    SlideFiducialMarksXML, SlideProfileXML, SlideXML, MCD,
 };
 
 use std::io::prelude::*;
@@ -25,6 +33,11 @@ pub enum ParserState {
     ProcessingImageStartOffset,
     ProcessingImageEndOffset,
     ProcessingImageFile,
+    ProcessingEnergyDb,
+    ProcessingFrequency,
+    ProcessingFMarkSlideLength,
+    ProcessingFMarkSlideThickness,
+    ProcessingName,
     ProcessingSwVersion,
     ProcessingSlideID,
     ProcessingSlideX1PosUm,
@@ -39,6 +52,36 @@ pub enum ParserState {
     ProcessingPixelHeight,
     ProcessingImageFormat,
     ProcessingPixelScaleCoef,
+    ProcessingType,
+    ProcessingIsLocked,
+    ProcessingRotationAngle,
+    ProcessingCalibration,
+    ProcessingCalibrationParams,
+    ProcessingCalibrationChannel,
+    ProcessingCalibrationFinal,
+    ProcessingTimeStamp,
+    ProcessingOptimalDetectorVoltageStart,
+    ProcessingOptimalDetectorVoltageEnd,
+    ProcessingOptimalDetectorDualCoefficientStart,
+    ProcessingOptimalDetectorDualCoefficientEnd,
+    ProcessingOptimalHelium,
+    ProcessingTransientStart,
+    ProcessingTransientCrossTalk1,
+    ProcessingTransientCrossTalk2,
+    ProcessingReferenceEnergy,
+    ProcessingMaximumEnergy,
+    ProcessingCalibrationID,
+    ProcessingOptimalDetectorVoltage,
+    ProcessingOptimalDetectorDualCoefficient,
+    ProcessingOptimalMakeupGas,
+    ProcessingOptimalCurrent,
+    ProcessingOptimalX,
+    ProcessingOptimalY,
+    ProcessingMeanDuals,
+    ProcessingSlideFiducialMarks,
+    ProcessingSlideProfile,
+    ProcessingCoordinateX,
+    ProcessingCoordinateY,
     ProcessingAcquisition,
     ProcessingAblationPower,
     ProcessingAblationDistanceBetweenShotsX,
@@ -67,6 +110,7 @@ pub enum ParserState {
     ProcessingPlumeStart,
     ProcessingPlumeEnd,
     ProcessingTemplate,
+    ProcessingProfilingType,
     ProcessingAcquisitionChannel,
     ProcessingChannelName,
     ProcessingOrderNumber,
@@ -97,6 +141,12 @@ pub struct MCDParser<T: Seek + Read> {
     errors: std::collections::VecDeque<String>,
 
     panoramas: HashMap<u16, Panorama<T>>,
+    calibration_finals: HashMap<u16, CalibrationFinal>,
+    calibration_params: HashMap<u16, CalibrationParams>,
+    calibration_channels: HashMap<u16, CalibrationChannel>,
+    calibrations: HashMap<u16, Calibration>,
+    slide_fiducal_marks: HashMap<u16, SlideFiducialMarks>,
+    slide_profiles: HashMap<u16, SlideProfile>,
     acquisitions: HashMap<u16, Acquisition<T>>,
     acquisition_channels: Vec<AcquisitionChannel>,
     acquisition_rois: Vec<AcquisitionROI>,
@@ -105,6 +155,12 @@ pub struct MCDParser<T: Seek + Read> {
 
     current_slide: Option<SlideXML>,
     current_panorama: Option<PanoramaXML>,
+    current_calibration_final: Option<CalibrationFinalXML>,
+    current_calibration_params: Option<CalibrationParamsXML>,
+    current_calibration_channel: Option<CalibrationChannelXML>,
+    current_calibration: Option<CalibrationXML>,
+    current_slide_fiducial_marks: Option<SlideFiducialMarksXML>,
+    current_slide_profile: Option<SlideProfileXML>,
     current_acquisition_channel: Option<AcquisitionChannelXML>,
     current_acquisition: Option<AcquisitionXML>,
     current_acquisition_roi: Option<AcquisitionROI>,
@@ -120,6 +176,12 @@ impl<T: Seek + Read> MCDParser<T> {
             errors: std::collections::VecDeque::new(),
 
             panoramas: HashMap::new(),
+            calibration_finals: HashMap::new(),
+            calibration_params: HashMap::new(),
+            calibration_channels: HashMap::new(),
+            calibrations: HashMap::new(),
+            slide_fiducal_marks: HashMap::new(),
+            slide_profiles: HashMap::new(),
             acquisitions: HashMap::new(),
             acquisition_channels: Vec::new(),
             acquisition_rois: Vec::new(),
@@ -129,6 +191,12 @@ impl<T: Seek + Read> MCDParser<T> {
 
             current_slide: None,
             current_panorama: None,
+            current_calibration_final: None,
+            current_calibration_params: None,
+            current_calibration_channel: None,
+            current_calibration: None,
+            current_slide_fiducial_marks: None,
+            current_slide_profile: None,
             current_acquisition_channel: None,
             current_acquisition: None,
             current_acquisition_roi: None,
@@ -157,6 +225,8 @@ impl<T: Seek + Read> MCDParser<T> {
         let mut acquisitions = HashMap::new();
         for (id, mut acquisition) in self.acquisitions.drain() {
             acquisition.reader = Some(reader.clone());
+            acquisition.fix_roi_start_pos();
+
             acquisitions.insert(id, acquisition);
         }
 
@@ -189,6 +259,9 @@ impl<T: Seek + Read> MCDParser<T> {
                 .get_mut(&slide_id)
                 .unwrap_or_else(|| panic!("Missing Slide with ID {}", slide_id));
             panorama.reader = Some(reader.clone());
+
+            panorama.fix_image_dimensions();
+
             slide.panoramas_mut().insert(id, panorama);
         }
 
@@ -219,7 +292,7 @@ impl<T: Seek + Read> MCDParser<T> {
     }
 
     pub fn process(&mut self, ev: Event) {
-        match ev {
+        match &ev {
             Event::Start(e) | Event::Empty(e) => match e.local_name() {
                 b"MCDSchema" => {
                     // TODO: get xmlns
@@ -233,6 +306,30 @@ impl<T: Seek + Read> MCDParser<T> {
                 b"Panorama" => {
                     self.current_panorama = Some(PanoramaXML::new());
                     self.state = ParserState::ProcessingPanorama
+                }
+                b"CalibrationFinal" => {
+                    self.current_calibration_final = Some(CalibrationFinalXML::new());
+                    self.state = ParserState::ProcessingCalibrationFinal
+                }
+                b"CalibrationParams" => {
+                    self.current_calibration_params = Some(CalibrationParamsXML::new());
+                    self.state = ParserState::ProcessingCalibrationParams
+                }
+                b"CalibrationChannel" => {
+                    self.current_calibration_channel = Some(CalibrationChannelXML::new());
+                    self.state = ParserState::ProcessingCalibrationChannel
+                }
+                b"Calibration" => {
+                    self.current_calibration = Some(CalibrationXML::new());
+                    self.state = ParserState::ProcessingCalibration
+                }
+                b"SlideFiducialMarks" => {
+                    self.current_slide_fiducial_marks = Some(SlideFiducialMarksXML::new());
+                    self.state = ParserState::ProcessingSlideFiducialMarks
+                }
+                b"SlideProfile" => {
+                    self.current_slide_profile = Some(SlideProfileXML::new());
+                    self.state = ParserState::ProcessingSlideProfile
                 }
                 b"AcquisitionROI" => {
                     self.current_acquisition_roi = Some(AcquisitionROI::new());
@@ -260,6 +357,13 @@ impl<T: Seek + Read> MCDParser<T> {
                 b"ImageStartOffset" => self.sub_state = ParserState::ProcessingImageStartOffset,
                 b"ImageEndOffset" => self.sub_state = ParserState::ProcessingImageEndOffset,
                 b"ImageFile" => self.sub_state = ParserState::ProcessingImageFile,
+                b"EnergyDb" => self.sub_state = ParserState::ProcessingEnergyDb,
+                b"Frequency" => self.sub_state = ParserState::ProcessingFrequency,
+                b"FMarkSlideLength" => self.sub_state = ParserState::ProcessingFMarkSlideLength,
+                b"FMarkSlideThickness" => {
+                    self.sub_state = ParserState::ProcessingFMarkSlideThickness
+                }
+                b"Name" => self.sub_state = ParserState::ProcessingName,
                 b"SwVersion" => self.sub_state = ParserState::ProcessingSwVersion,
                 b"SlideID" => self.sub_state = ParserState::ProcessingSlideID,
                 b"SlideX1PosUm" => self.sub_state = ParserState::ProcessingSlideX1PosUm,
@@ -274,10 +378,52 @@ impl<T: Seek + Read> MCDParser<T> {
                 b"PixelHeight" => self.sub_state = ParserState::ProcessingPixelHeight,
                 b"ImageFormat" => self.sub_state = ParserState::ProcessingImageFormat,
                 b"PixelScaleCoef" => self.sub_state = ParserState::ProcessingPixelScaleCoef,
+                b"Type" => self.sub_state = ParserState::ProcessingType,
+                b"IsLocked" => self.sub_state = ParserState::ProcessingIsLocked,
+                b"RotationAngle" => self.sub_state = ParserState::ProcessingRotationAngle,
+                b"TimeStamp" | b"Timestamp" => self.sub_state = ParserState::ProcessingTimeStamp,
+                b"OptimalDetectorVoltageStart" => {
+                    self.sub_state = ParserState::ProcessingOptimalDetectorVoltageStart
+                }
+                b"OptimalDetectorVoltageEnd" => {
+                    self.sub_state = ParserState::ProcessingOptimalDetectorVoltageEnd
+                }
+                b"OptimalDetectorDualCoefficientStart" => {
+                    self.sub_state = ParserState::ProcessingOptimalDetectorDualCoefficientStart
+                }
+                b"OptimalDetectorDualCoefficientEnd" => {
+                    self.sub_state = ParserState::ProcessingOptimalDetectorDualCoefficientEnd
+                }
+                b"OptimalHelium" => self.sub_state = ParserState::ProcessingOptimalHelium,
+                b"TransientStart" => self.sub_state = ParserState::ProcessingTransientStart,
+                b"TransientCrossTalk1" => {
+                    self.sub_state = ParserState::ProcessingTransientCrossTalk1
+                }
+                b"TransientCrossTalk2" => {
+                    self.sub_state = ParserState::ProcessingTransientCrossTalk2
+                }
+                b"ReferenceEnergy" => self.sub_state = ParserState::ProcessingReferenceEnergy,
+                b"MaximumEnergy" => self.sub_state = ParserState::ProcessingMaximumEnergy,
+                b"CalibrationID" => self.sub_state = ParserState::ProcessingCalibrationID,
+                b"OptimalDetectorVoltage" => {
+                    self.sub_state = ParserState::ProcessingOptimalDetectorVoltage
+                }
+                b"OptimalDetectorDualCoefficient" => {
+                    self.sub_state = ParserState::ProcessingOptimalDetectorDualCoefficient
+                }
+                b"OptimalMakeupGas" => self.sub_state = ParserState::ProcessingOptimalMakeupGas,
+                b"OptimalCurrent" => self.sub_state = ParserState::ProcessingOptimalCurrent,
+                b"OptimalX" => self.sub_state = ParserState::ProcessingOptimalX,
+                b"OptimalY" => self.sub_state = ParserState::ProcessingOptimalY,
+                b"MeanDuals" => self.sub_state = ParserState::ProcessingMeanDuals,
+                b"CoordinateX" => self.sub_state = ParserState::ProcessingCoordinateX,
+                b"CoordinateY" => self.sub_state = ParserState::ProcessingCoordinateY,
                 b"ChannelName" => self.sub_state = ParserState::ProcessingChannelName,
                 b"OrderNumber" => self.sub_state = ParserState::ProcessingOrderNumber,
                 b"AcquisitionID" => self.sub_state = ParserState::ProcessingAcquisitionID,
-                b"ChannelLabel" => self.sub_state = ParserState::ProcessingChannelLabel,
+                b"ChannelLabel" => {
+                    self.sub_state = ParserState::ProcessingChannelLabel;
+                }
                 b"AblationPower" => self.sub_state = ParserState::ProcessingAblationPower,
                 b"AblationDistanceBetweenShotsX" => {
                     self.sub_state = ParserState::ProcessingAblationDistanceBetweenShotsX
@@ -317,8 +463,16 @@ impl<T: Seek + Read> MCDParser<T> {
                 b"PlumeStart" => self.sub_state = ParserState::ProcessingPlumeStart,
                 b"PlumeEnd" => self.sub_state = ParserState::ProcessingPlumeEnd,
                 b"Template" => self.sub_state = ParserState::ProcessingTemplate,
+                b"ProfilingType" => self.sub_state = ParserState::ProcessingProfilingType,
                 b"PanoramaID" => self.sub_state = ParserState::ProcessingPanoramaID,
-                b"ROIType" => self.sub_state = ParserState::ProcessingROIType,
+                b"ROIType" => {
+                    // In version 2 of XSD there are empty ROIType tags, so only trigger processing of ROIType
+                    // if we have a start tag (not an empty tag)
+                    match &ev {
+                        Event::Start(_e) => self.sub_state = ParserState::ProcessingROIType,
+                        _ => self.sub_state = ParserState::Processing,
+                    };
+                }
                 b"SlideXPosUm" => self.sub_state = ParserState::ProcessingSlideXPosUm,
                 b"SlideYPosUm" => self.sub_state = ParserState::ProcessingSlideYPosUm,
                 b"PanoramaPixelXPos" => self.sub_state = ParserState::ProcessingPanoramaPixelXPos,
@@ -327,6 +481,8 @@ impl<T: Seek + Read> MCDParser<T> {
                     Ok(name) => {
                         self.errors
                             .push_back(format!("[Start] Unknown tag name: {}", name));
+
+                        panic!("[Start] Unknown tag name: {}", name);
                     }
                     Err(error) => {
                         println!("Failed to convert tag name: {}", error);
@@ -350,6 +506,53 @@ impl<T: Seek + Read> MCDParser<T> {
                     let panorama = self.current_panorama.take().unwrap();
                     let panorama_id = panorama.id.as_ref().unwrap();
                     self.panoramas.insert(*panorama_id, panorama.into());
+
+                    self.state = ParserState::Processing
+                }
+                b"CalibrationFinal" => {
+                    let calibration_final = self.current_calibration_final.take().unwrap();
+                    let calibration_final_id = calibration_final.id.as_ref().unwrap();
+                    self.calibration_finals
+                        .insert(*calibration_final_id, calibration_final.into());
+
+                    self.state = ParserState::Processing
+                }
+                b"CalibrationParams" => {
+                    let calibration_params = self.current_calibration_params.take().unwrap();
+                    let calibration_params_id = calibration_params.calibration_id.as_ref().unwrap();
+                    self.calibration_params
+                        .insert(*calibration_params_id, calibration_params.into());
+
+                    self.state = ParserState::Processing
+                }
+                b"CalibrationChannel" => {
+                    let calibration_channel = self.current_calibration_channel.take().unwrap();
+                    let calibration_channel_id = calibration_channel.id.as_ref().unwrap();
+                    self.calibration_channels
+                        .insert(*calibration_channel_id, calibration_channel.into());
+
+                    self.state = ParserState::Processing
+                }
+                b"Calibration" => {
+                    let calibration = self.current_calibration.take().unwrap();
+                    let calibration_id = calibration.id.as_ref().unwrap();
+                    self.calibrations
+                        .insert(*calibration_id, calibration.into());
+
+                    self.state = ParserState::Processing
+                }
+                b"SlideFiducialMarks" => {
+                    let slide_fiducal_marks = self.current_slide_fiducial_marks.take().unwrap();
+                    let id = slide_fiducal_marks.id.as_ref().unwrap();
+                    self.slide_fiducal_marks
+                        .insert(*id, slide_fiducal_marks.into());
+
+                    self.state = ParserState::Processing
+                }
+                b"SlideProfile" => {
+                    let slide_profile = self.current_slide_profile.take().unwrap();
+                    let id = slide_profile.id.as_ref().unwrap();
+                    self.slide_profiles.insert(*id, slide_profile.into());
 
                     self.state = ParserState::Processing
                 }
@@ -399,89 +602,51 @@ impl<T: Seek + Read> MCDParser<T> {
                 match self.state {
                     ParserState::ProcessingSlide => {
                         let slide = self.current_slide.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => {
-                                let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                    .unwrap()
-                                    .to_owned();
-                                let id = id.parse().unwrap();
-
-                                slide.id = Some(id)
-                            }
-                            ParserState::ProcessingUID => {
-                                slide.uid = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
-                            }
+                            ParserState::ProcessingID => slide.id = Some(text.parse().unwrap()),
+                            ParserState::ProcessingUID => slide.uid = Some(text.parse().unwrap()),
                             ParserState::ProcessingDescription => {
-                                slide.description = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                slide.description = Some(text.to_string())
                             }
                             ParserState::ProcessingFilename => {
-                                slide.filename = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                slide.filename = Some(text.to_string())
                             }
                             ParserState::ProcessingSlideType => {
-                                slide.slide_type = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                slide.slide_type = Some(text.to_string())
                             }
                             ParserState::ProcessingWidthUm => {
-                                slide.width_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                slide.width_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingHeightUm => {
-                                slide.height_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                slide.height_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageStartOffset => {
-                                slide.image_start_offset = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                slide.image_start_offset = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageEndOffset => {
-                                slide.image_end_offset = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                slide.image_end_offset = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageFile => {
-                                slide.image_file = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                slide.image_file = Some(text.to_string())
                             }
+                            ParserState::ProcessingEnergyDb => {
+                                slide.energy_db = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingFrequency => {
+                                slide.frequency = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingFMarkSlideLength => {
+                                slide.fmark_slide_length = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingFMarkSlideThickness => {
+                                slide.fmark_slide_thickness = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingName => slide.name = Some(text.to_string()),
                             ParserState::ProcessingSwVersion => {
-                                slide.sw_version = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .to_owned(),
-                                )
+                                slide.sw_version = Some(text.to_string())
                             }
                             _ => {}
                         }
@@ -491,124 +656,52 @@ impl<T: Seek + Read> MCDParser<T> {
 
                     ParserState::ProcessingPanorama => {
                         let panorama = self.current_panorama.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
 
                         match self.sub_state {
-                            ParserState::ProcessingID => {
-                                let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                    .unwrap()
-                                    .to_owned();
-
-                                panorama.id = Some(id.parse().unwrap())
-                            }
+                            ParserState::ProcessingID => panorama.id = Some(text.parse().unwrap()),
                             ParserState::ProcessingSlideID => {
-                                let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                    .unwrap()
-                                    .to_owned();
-
-                                panorama.slide_id = Some(id.parse().unwrap())
+                                panorama.slide_id = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingDescription => {
-                                let id = std::str::from_utf8(&e.unescaped().unwrap())
-                                    .unwrap()
-                                    .to_owned();
-
-                                panorama.description = Some(id.parse().unwrap())
+                                panorama.description = Some(text.to_string())
                             }
                             ParserState::ProcessingSlideX1PosUm => {
-                                panorama.slide_x1_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_x1_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideY1PosUm => {
-                                panorama.slide_y1_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_y1_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideX2PosUm => {
-                                panorama.slide_x2_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_x2_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideY2PosUm => {
-                                panorama.slide_y2_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_y2_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideX3PosUm => {
-                                panorama.slide_x3_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_x3_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideY3PosUm => {
-                                panorama.slide_y3_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_y3_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideX4PosUm => {
-                                panorama.slide_x4_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_x4_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingSlideY4PosUm => {
-                                panorama.slide_y4_pos_um = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.slide_y4_pos_um = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageStartOffset => {
-                                panorama.image_start_offset = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.image_start_offset = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageEndOffset => {
-                                panorama.image_end_offset = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.image_end_offset = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingPixelWidth => {
-                                panorama.pixel_width = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.pixel_width = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingPixelHeight => {
-                                panorama.pixel_height = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.pixel_height = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageFormat => {
                                 match std::str::from_utf8(&e.unescaped().unwrap()).as_ref() {
@@ -618,12 +711,264 @@ impl<T: Seek + Read> MCDParser<T> {
                                 }
                             }
                             ParserState::ProcessingPixelScaleCoef => {
-                                panorama.pixel_scale_coef = Some(
-                                    std::str::from_utf8(&e.unescaped().unwrap())
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap(),
-                                )
+                                panorama.pixel_scale_coef = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingType => match text {
+                                "Default" => {
+                                    panorama.panorama_type = Some(PanoramaType::Default);
+                                }
+                                "Imported" => {
+                                    panorama.panorama_type = Some(PanoramaType::Imported);
+                                }
+                                "Instrument" => {
+                                    panorama.panorama_type = Some(PanoramaType::Instrument);
+                                }
+                                _ => {
+                                    panic!("Unknown panorama type: {}", text);
+                                }
+                            },
+                            ParserState::ProcessingIsLocked => {
+                                panorama.is_locked = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingRotationAngle => {
+                                panorama.rotation_angle = Some(text.parse().unwrap())
+                            }
+                            ParserState::Processing => {}
+                            _ => {
+                                panic!(
+                                    "Unknown sub state {:?} in state {:?} with event {:?}",
+                                    self.sub_state, self.state, e
+                                );
+                            }
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingCalibrationFinal => {
+                        let calibration_final = self.current_calibration_final.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                calibration_final.id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAcquisitionID => {
+                                calibration_final.acquisition_id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTimeStamp => {
+                                calibration_final.time_stamp = Some(text.to_string())
+                            }
+                            ParserState::ProcessingOptimalDetectorVoltageStart => {
+                                calibration_final.optimal_detector_voltage_start =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalDetectorVoltageEnd => {
+                                calibration_final.optimal_detector_voltage_end =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalDetectorDualCoefficientStart => {
+                                calibration_final.optimal_detector_dual_coefficient_start =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalDetectorDualCoefficientEnd => {
+                                calibration_final.optimal_detector_dual_coefficient_end =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalHelium => {
+                                calibration_final.optimal_helium = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTransientStart => {
+                                calibration_final.transient_start = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTransientCrossTalk1 => {
+                                calibration_final.transient_cross_talk_1 =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTransientCrossTalk2 => {
+                                calibration_final.transient_cross_talk_2 =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingReferenceEnergy => {
+                                calibration_final.reference_energy = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingMaximumEnergy => {
+                                calibration_final.maximum_energy = Some(text.parse().unwrap())
+                            }
+                            ParserState::Processing => {}
+                            _ => {
+                                panic!(
+                                    "Unknown sub state {:?} in state {:?} with event {:?}",
+                                    self.sub_state, self.state, e
+                                );
+                            }
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingCalibrationParams => {
+                        let calibration_params = self.current_calibration_params.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingCalibrationID => {
+                                calibration_params.calibration_id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalDetectorVoltage => {
+                                calibration_params.optimal_detector_voltage =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalDetectorDualCoefficient => {
+                                calibration_params.optimal_detector_dual_coefficient =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalMakeupGas => {
+                                calibration_params.optimal_makeup_gas = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalCurrent => {
+                                calibration_params.optimal_current = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalX => {
+                                calibration_params.optimal_x = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalY => {
+                                calibration_params.optimal_y = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTransientStart => {
+                                calibration_params.transient_start = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTransientCrossTalk1 => {
+                                calibration_params.transient_cross_talk_1 =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTransientCrossTalk2 => {
+                                calibration_params.transient_cross_talk_2 =
+                                    Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingOptimalHelium => {
+                                calibration_params.optimal_helium = Some(text.parse().unwrap())
+                            }
+                            ParserState::Processing => {}
+                            _ => {
+                                panic!(
+                                    "Unknown sub state {:?} in state {:?} with event {:?}",
+                                    self.sub_state, self.state, e
+                                );
+                            }
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingCalibrationChannel => {
+                        let calibration_channel =
+                            self.current_calibration_channel.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                calibration_channel.id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingCalibrationID => {
+                                calibration_channel.calibration_id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingName => {
+                                calibration_channel.name = Some(text.to_string())
+                            }
+                            ParserState::ProcessingMeanDuals => {
+                                calibration_channel.mean_duals = Some(text.parse().unwrap())
+                            }
+                            ParserState::Processing => {}
+                            _ => {
+                                panic!(
+                                    "Unknown sub state {:?} in state {:?} with event {:?}",
+                                    self.sub_state, self.state, e
+                                );
+                            }
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingCalibration => {
+                        let calibration = self.current_calibration.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                calibration.id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingAcquisitionID => {
+                                calibration.acquisition_id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingTimeStamp => {
+                                calibration.time_stamp = Some(text.to_string())
+                            }
+                            ParserState::Processing => {}
+                            _ => {
+                                panic!(
+                                    "Unknown sub state {:?} in state {:?} with event {:?}",
+                                    self.sub_state, self.state, e
+                                );
+                            }
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingSlideFiducialMarks => {
+                        let slide_fiducal_marks =
+                            self.current_slide_fiducial_marks.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                slide_fiducal_marks.id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingSlideID => {
+                                slide_fiducal_marks.slide_id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingCoordinateX => {
+                                slide_fiducal_marks.coordinate_x = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingCoordinateY => {
+                                slide_fiducal_marks.coordinate_y = Some(text.parse().unwrap())
+                            }
+                            ParserState::Processing => {}
+                            _ => {
+                                panic!(
+                                    "Unknown sub state {:?} in state {:?} with event {:?}",
+                                    self.sub_state, self.state, e
+                                );
+                            }
+                        }
+
+                        self.sub_state = ParserState::Processing
+                    }
+
+                    ParserState::ProcessingSlideProfile => {
+                        let slide_profile = self.current_slide_profile.as_mut().unwrap();
+                        let unprocessed_text = &e.unescaped().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+
+                        match self.sub_state {
+                            ParserState::ProcessingID => {
+                                slide_profile.id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingSlideID => {
+                                slide_profile.slide_id = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingCoordinateX => {
+                                slide_profile.coordinate_x = Some(text.parse().unwrap())
+                            }
+                            ParserState::ProcessingCoordinateY => {
+                                slide_profile.coordinate_y = Some(text.parse().unwrap())
                             }
                             ParserState::Processing => {}
                             _ => {
@@ -788,6 +1133,14 @@ impl<T: Seek + Read> MCDParser<T> {
                             ParserState::ProcessingTemplate => {
                                 acquisition.template = Some(text.to_owned())
                             }
+                            ParserState::ProcessingProfilingType => match text {
+                                "Global" => {
+                                    acquisition.profiling_type = Some(ProfilingType::Global);
+                                }
+                                _ => {
+                                    panic!("Unknown profiling type: {}", text);
+                                }
+                            },
                             ParserState::Processing => {}
                             _ => {
                                 panic!(
@@ -809,6 +1162,9 @@ impl<T: Seek + Read> MCDParser<T> {
                             ParserState::ProcessingID => {
                                 acquisition_roi.id = Some(text.parse().unwrap())
                             }
+                            ParserState::ProcessingDescription => {
+                                acquisition_roi.description = Some(text.to_string())
+                            }
                             ParserState::ProcessingPanoramaID => {
                                 acquisition_roi.panorama_id = Some(text.parse().unwrap())
                             }
@@ -817,7 +1173,7 @@ impl<T: Seek + Read> MCDParser<T> {
                                     acquisition_roi.roi_type = Some(ROIType::Acquisition)
                                 }
                                 _ => {
-                                    todo!()
+                                    panic!("Unknown ROIType: {}", text);
                                 }
                             },
                             ParserState::Processing => {}

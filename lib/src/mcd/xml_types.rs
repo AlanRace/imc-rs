@@ -1,4 +1,7 @@
-use crate::acquisition::DataFormat;
+use crate::{
+    acquisition::{DataFormat, ProfilingType},
+    panorama::PanoramaType,
+};
 
 use super::{AcquisitionChannel, ImageFormat};
 
@@ -10,6 +13,8 @@ pub(crate) enum ROIType {
 #[derive(Debug)]
 pub(crate) struct AcquisitionROI {
     pub(crate) id: Option<u16>,
+    // Description is only present in version 2 of the XSD
+    pub(crate) description: Option<String>,
     pub(crate) panorama_id: Option<u16>,
     pub(crate) roi_type: Option<ROIType>,
 }
@@ -18,6 +23,7 @@ impl AcquisitionROI {
     pub fn new() -> AcquisitionROI {
         AcquisitionROI {
             id: None,
+            description: None,
             panorama_id: None,
             roi_type: None,
         }
@@ -113,6 +119,7 @@ pub(crate) struct AcquisitionXML {
     pub(crate) plume_start: Option<i32>,
     pub(crate) plume_end: Option<i32>,
     pub(crate) template: Option<String>,
+    pub(crate) profiling_type: Option<ProfilingType>,
 }
 
 impl AcquisitionXML {
@@ -148,6 +155,7 @@ impl AcquisitionXML {
             plume_start: None,
             plume_end: None,
             template: None,
+            profiling_type: None,
         }
     }
 }
@@ -165,6 +173,12 @@ pub(crate) struct SlideXML {
     pub(crate) image_end_offset: Option<i64>,
     pub(crate) image_file: Option<String>,
 
+    pub(crate) energy_db: Option<u32>,
+    pub(crate) frequency: Option<u32>,
+    pub(crate) fmark_slide_length: Option<u64>,
+    pub(crate) fmark_slide_thickness: Option<u64>,
+    pub(crate) name: Option<String>,
+
     pub(crate) sw_version: Option<String>,
 }
 
@@ -181,6 +195,11 @@ impl SlideXML {
             image_start_offset: None,
             image_end_offset: None,
             image_file: None,
+            energy_db: None,
+            frequency: None,
+            fmark_slide_length: None,
+            fmark_slide_thickness: None,
+            name: None,
             sw_version: None,
         }
     }
@@ -206,6 +225,10 @@ pub(crate) struct PanoramaXML {
     pub(crate) pixel_height: Option<i64>,
     pub(crate) image_format: Option<ImageFormat>,
     pub(crate) pixel_scale_coef: Option<f64>,
+
+    pub(crate) panorama_type: Option<PanoramaType>,
+    pub(crate) is_locked: Option<bool>,
+    pub(crate) rotation_angle: Option<u16>,
 }
 
 impl PanoramaXML {
@@ -228,6 +251,147 @@ impl PanoramaXML {
             pixel_height: None,
             image_format: None,
             pixel_scale_coef: None,
+            panorama_type: None,
+            is_locked: None,
+            rotation_angle: None,
+        }
+    }
+}
+
+pub(crate) struct CalibrationFinalXML {
+    pub(crate) id: Option<u16>,
+    pub(crate) acquisition_id: Option<u16>,
+    pub(crate) time_stamp: Option<String>,
+    pub(crate) optimal_detector_voltage_start: Option<f64>,
+    pub(crate) optimal_detector_voltage_end: Option<f64>,
+    pub(crate) optimal_detector_dual_coefficient_start: Option<f64>,
+    pub(crate) optimal_detector_dual_coefficient_end: Option<f64>,
+    pub(crate) optimal_helium: Option<f64>,
+    pub(crate) transient_start: Option<u32>,
+    pub(crate) transient_cross_talk_1: Option<u32>,
+    pub(crate) transient_cross_talk_2: Option<u32>,
+    pub(crate) reference_energy: Option<f64>,
+    pub(crate) maximum_energy: Option<f64>,
+}
+
+impl CalibrationFinalXML {
+    pub fn new() -> Self {
+        CalibrationFinalXML {
+            id: None,
+            acquisition_id: None,
+            time_stamp: None,
+            optimal_detector_voltage_start: None,
+            optimal_detector_voltage_end: None,
+            optimal_detector_dual_coefficient_start: None,
+            optimal_detector_dual_coefficient_end: None,
+            optimal_helium: None,
+            transient_start: None,
+            transient_cross_talk_1: None,
+            transient_cross_talk_2: None,
+            reference_energy: None,
+            maximum_energy: None,
+        }
+    }
+}
+
+pub(crate) struct CalibrationXML {
+    pub(crate) id: Option<u16>,
+    pub(crate) acquisition_id: Option<u16>,
+    pub(crate) time_stamp: Option<String>,
+}
+
+impl CalibrationXML {
+    pub fn new() -> Self {
+        CalibrationXML {
+            id: None,
+            acquisition_id: None,
+            time_stamp: None,
+        }
+    }
+}
+
+pub struct CalibrationParamsXML {
+    pub(crate) calibration_id: Option<u16>,
+    pub(crate) optimal_detector_voltage: Option<f64>,
+    pub(crate) optimal_detector_dual_coefficient: Option<f64>,
+    pub(crate) optimal_makeup_gas: Option<f64>,
+    pub(crate) optimal_current: Option<f64>,
+    pub(crate) optimal_x: Option<u32>,
+    pub(crate) optimal_y: Option<u32>,
+    pub(crate) transient_start: Option<u32>,
+    pub(crate) transient_cross_talk_1: Option<f64>,
+    pub(crate) transient_cross_talk_2: Option<f64>,
+    pub(crate) optimal_helium: Option<f64>,
+}
+
+impl CalibrationParamsXML {
+    pub fn new() -> Self {
+        CalibrationParamsXML {
+            calibration_id: None,
+            optimal_detector_voltage: None,
+            optimal_detector_dual_coefficient: None,
+            optimal_makeup_gas: None,
+            optimal_current: None,
+            optimal_x: None,
+            optimal_y: None,
+            transient_start: None,
+            transient_cross_talk_1: None,
+            transient_cross_talk_2: None,
+            optimal_helium: None,
+        }
+    }
+}
+
+pub struct CalibrationChannelXML {
+    pub(crate) calibration_id: Option<u16>,
+    pub(crate) name: Option<String>,
+    pub(crate) mean_duals: Option<f64>,
+    pub(crate) id: Option<u16>,
+}
+
+impl CalibrationChannelXML {
+    pub fn new() -> Self {
+        CalibrationChannelXML {
+            calibration_id: None,
+            name: None,
+            mean_duals: None,
+            id: None,
+        }
+    }
+}
+
+pub struct SlideFiducialMarksXML {
+    pub(crate) id: Option<u16>,
+    pub(crate) slide_id: Option<u16>,
+    pub(crate) coordinate_x: Option<u32>,
+    pub(crate) coordinate_y: Option<u32>,
+}
+
+impl SlideFiducialMarksXML {
+    pub fn new() -> Self {
+        SlideFiducialMarksXML {
+            id: None,
+            slide_id: None,
+            coordinate_x: None,
+            coordinate_y: None,
+        }
+    }
+}
+
+pub struct SlideProfileXML {
+    pub(crate) id: Option<u16>,
+    pub(crate) slide_id: Option<u16>,
+    pub(crate) coordinate_x: Option<u32>,
+    pub(crate) coordinate_y: Option<u32>,
+}
+
+impl SlideProfileXML {
+    pub fn new() -> Self {
+        SlideProfileXML {
+            id: None,
+            slide_id: None,
+            coordinate_x: None,
+            coordinate_y: None,
         }
     }
 }
