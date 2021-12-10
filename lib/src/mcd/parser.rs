@@ -7,7 +7,6 @@ use crate::{
     calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams},
     panorama::PanoramaType,
     slide::{SlideFiducialMarks, SlideProfile},
-    OpticalImage,
 };
 
 use super::{

@@ -51,9 +51,11 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
 use acquisition::AcquisitionIdentifier;
+use calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams};
 use mcd::{MCDParser, ParserState};
 
 use image::{ImageFormat, RgbaImage};
+use slide::{SlideFiducialMarks, SlideProfile};
 use transform::AffineTransform;
 
 const BUF_SIZE: usize = 4096;
@@ -97,6 +99,12 @@ pub struct MCD<T: Seek + Read> {
     //acquisitions: HashMap<String, Arc<Acquisition>>,
     //acquisition_rois: Vec<AcquisitionROI>,
     //roi_points: Vec<ROIPoint>,
+    calibration_finals: HashMap<u16, CalibrationFinal>,
+    calibration_params: HashMap<u16, CalibrationParams>,
+    calibration_channels: HashMap<u16, CalibrationChannel>,
+    calibrations: HashMap<u16, Calibration>,
+    slide_fiducal_marks: HashMap<u16, SlideFiducialMarks>,
+    slide_profiles: HashMap<u16, SlideProfile>,
 }
 
 fn find_mcd_start(chunk: &[u8], chunk_size: usize) -> usize {
@@ -127,6 +135,12 @@ impl<T: Seek + Read> MCD<T> {
             //acquisition_order: Vec::new(),
             //acquisitions: HashMap::new(),
             //acquisition_rois: Vec::new(),
+            calibration_finals: HashMap::new(),
+            calibration_params: HashMap::new(),
+            calibration_channels: HashMap::new(),
+            calibrations: HashMap::new(),
+            slide_fiducal_marks: HashMap::new(),
+            slide_profiles: HashMap::new(),
         }
     }
 
@@ -256,6 +270,36 @@ impl<T: Seek + Read> MCD<T> {
         ordered_channels.sort_by_key(|a| a.order_number());
 
         ordered_channels
+    }
+
+    /// Returns an instance of `CalibrationFinal` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
+    pub fn calibration_final(&self, id: u16) -> Option<&CalibrationFinal> {
+        self.calibration_finals.get(&id)
+    }
+
+    /// Returns an instance of `CalibrationParams` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
+    pub fn calibration_params(&self, id: u16) -> Option<&CalibrationParams> {
+        self.calibration_params.get(&id)
+    }
+
+    /// Returns an instance of `CalibrationChannel` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
+    pub fn calibration_channels(&self, id: u16) -> Option<&CalibrationChannel> {
+        self.calibration_channels.get(&id)
+    }
+
+    /// Returns an instance of `Calibration` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
+    pub fn calibration(&self, id: u16) -> Option<&Calibration> {
+        self.calibrations.get(&id)
+    }
+
+    /// Returns an instance of `SlideFiducialMarks` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
+    pub fn slide_fiducal_marks(&self, id: u16) -> Option<&SlideFiducialMarks> {
+        self.slide_fiducal_marks.get(&id)
+    }
+
+    /// Returns an instance of `SlideProfile` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
+    pub fn slide_profile(&self, id: u16) -> Option<&SlideProfile> {
+        self.slide_profiles.get(&id)
     }
 
     /// Parse *.mcd format
@@ -499,7 +543,7 @@ mod tests {
             let file = BufReader::new(File::open(path.path()).unwrap());
             let mut mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap());
 
-            let xml = mcd.xml();
+            let _xml = mcd.xml();
 
             //println!("{}", xml);
 

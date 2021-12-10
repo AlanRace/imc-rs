@@ -168,6 +168,11 @@ impl<T: Read + Seek> Acquisition<T> {
         self.acquisition_roi_id
     }
 
+    /// Returns the profiling type for the acquisition, if one is present. This is not present in version 1 of the schema
+    pub fn profiling_type(&self) -> Option<&ProfilingType> {
+        self.profiling_type.as_ref()
+    }
+
     fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader

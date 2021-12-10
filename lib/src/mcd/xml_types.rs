@@ -342,11 +342,23 @@ impl CalibrationParamsXML {
     }
 }
 
+impl Default for CalibrationParamsXML {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct CalibrationChannelXML {
     pub(crate) calibration_id: Option<u16>,
     pub(crate) name: Option<String>,
     pub(crate) mean_duals: Option<f64>,
     pub(crate) id: Option<u16>,
+}
+
+impl Default for CalibrationChannelXML {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CalibrationChannelXML {
@@ -378,6 +390,12 @@ impl SlideFiducialMarksXML {
     }
 }
 
+impl Default for SlideFiducialMarksXML {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct SlideProfileXML {
     pub(crate) id: Option<u16>,
     pub(crate) slide_id: Option<u16>,
@@ -393,5 +411,11 @@ impl SlideProfileXML {
             coordinate_x: None,
             coordinate_y: None,
         }
+    }
+}
+
+impl Default for SlideProfileXML {
+    fn default() -> Self {
+        Self::new()
     }
 }

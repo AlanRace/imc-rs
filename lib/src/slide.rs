@@ -122,6 +122,31 @@ impl<T: Seek + Read> Slide<T> {
         &self.sw_version
     }
 
+    /// Returns the energy in Db
+    pub fn energy_db(&self) -> Option<u32> {
+        self.energy_db
+    }
+
+    /// Returns the frequency
+    pub fn frequency(&self) -> Option<u32> {
+        self.frequency
+    }
+
+    /// Returns the fmark slide length
+    pub fn fmark_slide_length(&self) -> Option<u64> {
+        self.fmark_slide_length
+    }
+
+    /// Returns the fmark slide thickness
+    pub fn fmark_slide_thickness(&self) -> Option<u64> {
+        self.fmark_slide_thickness
+    }
+
+    /// Returns the name given to the slide
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     /// Returns associated image data
     pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
@@ -470,11 +495,27 @@ impl<T: Seek + Read> fmt::Display for Slide<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct SlideFiducialMarks {
     id: u16,
     slide_id: u16,
     coordinate_x: u32,
     coordinate_y: u32,
+}
+
+impl SlideFiducialMarks {
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+    pub fn slide_id(&self) -> u16 {
+        self.slide_id
+    }
+    pub fn coordinate_x(&self) -> u32 {
+        self.coordinate_x
+    }
+    pub fn coordinate_y(&self) -> u32 {
+        self.coordinate_y
+    }
 }
 
 impl From<SlideFiducialMarksXML> for SlideFiducialMarks {
@@ -488,11 +529,29 @@ impl From<SlideFiducialMarksXML> for SlideFiducialMarks {
     }
 }
 
+#[derive(Debug)]
 pub struct SlideProfile {
     id: u16,
     slide_id: u16,
     coordinate_x: u32,
     coordinate_y: u32,
+}
+
+impl SlideProfile {
+    /// Returns the ID of the slide profile
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+
+    pub fn slide_id(&self) -> u16 {
+        self.slide_id
+    }
+    pub fn coordinate_x(&self) -> u32 {
+        self.coordinate_x
+    }
+    pub fn coordinate_y(&self) -> u32 {
+        self.coordinate_y
+    }
 }
 
 impl From<SlideProfileXML> for SlideProfile {

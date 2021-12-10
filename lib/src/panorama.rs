@@ -78,6 +78,21 @@ impl<T: Seek + Read> Panorama<T> {
         self.pixel_scale_coef
     }
 
+    /// Returns the type of the panorama image, if known. This is unknown in the first version of the schema
+    pub fn panorama_type(&self) -> Option<&PanoramaType> {
+        self.panorama_type.as_ref()
+    }
+
+    /// Returns whether the panorama is locked or not (if known). This is unknown in the first version of the schema
+    pub fn is_locked(&self) -> Option<bool> {
+        self.is_locked
+    }
+
+    /// Returns the rotation angle of the panorama (if known). This is unknown in the first version of the schema
+    pub fn rotation_angle(&self) -> Option<u16> {
+        self.rotation_angle
+    }
+
     /// Returns a sorted (acsending) list of acquisition IDs
     pub fn acquisition_ids(&self) -> Vec<u16> {
         let mut ids: Vec<u16> = Vec::with_capacity(self.acquisitions.len());

@@ -107,7 +107,7 @@ where
         }
     }
 
-    /*fn inverse_transform(&self) -> AffineTransform<T> {
+    pub fn inverse_transform(&self) -> AffineTransform<T> {
         // TODO: invert the matrix if necessary
         let direction = match self.direction {
             Direction::ToSlide => Direction::FromSlide,
@@ -116,10 +116,10 @@ where
 
         AffineTransform {
             direction,
-            matrix: self.inv_matix.clone(),
-            inv_matix: self.matrix.clone(),
+            matrix: Matrix3::<T>::identity() * self.inv_matix.unwrap(),
+            inv_matix: Some(Matrix3::<T>::identity() * self.matrix),
         }
-    }*/
+    }
 
     pub fn to_slide_matrix(&self) -> &Matrix3<T> {
         match self.direction {

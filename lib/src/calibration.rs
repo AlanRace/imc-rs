@@ -2,6 +2,7 @@ use crate::mcd::{
     CalibrationChannelXML, CalibrationFinalXML, CalibrationParamsXML, CalibrationXML,
 };
 
+#[derive(Debug)]
 pub struct CalibrationFinal {
     id: u16,
     acquisition_id: u16,
@@ -16,6 +17,50 @@ pub struct CalibrationFinal {
     transient_cross_talk_2: u32,
     reference_energy: f64,
     maximum_energy: f64,
+}
+
+impl CalibrationFinal {
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+    pub fn acquisition_id(&self) -> u16 {
+        self.acquisition_id
+    }
+
+    pub fn time_stamp(&self) -> &str {
+        &self.time_stamp
+    }
+
+    pub fn optimal_detector_voltage_start(&self) -> f64 {
+        self.optimal_detector_voltage_start
+    }
+    pub fn optimal_detector_voltage_end(&self) -> f64 {
+        self.optimal_detector_voltage_end
+    }
+    pub fn optimal_detector_dual_coefficient_start(&self) -> f64 {
+        self.optimal_detector_dual_coefficient_start
+    }
+    pub fn optimal_detector_dual_coefficient_end(&self) -> f64 {
+        self.optimal_detector_dual_coefficient_end
+    }
+    pub fn optimal_helium(&self) -> f64 {
+        self.optimal_helium
+    }
+    pub fn transient_start(&self) -> u32 {
+        self.transient_start
+    }
+    pub fn transient_cross_talk_1(&self) -> u32 {
+        self.transient_cross_talk_1
+    }
+    pub fn transient_cross_talk_2(&self) -> u32 {
+        self.transient_cross_talk_2
+    }
+    pub fn reference_energy(&self) -> f64 {
+        self.reference_energy
+    }
+    pub fn maximum_energy(&self) -> f64 {
+        self.maximum_energy
+    }
 }
 
 impl From<CalibrationFinalXML> for CalibrationFinal {
@@ -44,10 +89,23 @@ impl From<CalibrationFinalXML> for CalibrationFinal {
     }
 }
 
+#[derive(Debug)]
 pub struct Calibration {
     id: u16,
     acquisition_id: u16,
     time_stamp: String,
+}
+
+impl Calibration {
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+    pub fn acquisition_id(&self) -> u16 {
+        self.acquisition_id
+    }
+    pub fn time_stamp(&self) -> &str {
+        &self.time_stamp
+    }
 }
 
 impl From<CalibrationXML> for Calibration {
@@ -60,6 +118,7 @@ impl From<CalibrationXML> for Calibration {
     }
 }
 
+#[derive(Debug)]
 pub struct CalibrationParams {
     calibration_id: u16,
     optimal_detector_voltage: f64,
@@ -72,6 +131,42 @@ pub struct CalibrationParams {
     transient_cross_talk_1: f64,
     transient_cross_talk_2: f64,
     optimal_helium: f64,
+}
+
+impl CalibrationParams {
+    pub fn calibration_id(&self) -> u16 {
+        self.calibration_id
+    }
+    pub fn optimal_detector_voltage(&self) -> f64 {
+        self.optimal_detector_voltage
+    }
+    pub fn optimal_detector_dual_coefficient(&self) -> f64 {
+        self.optimal_detector_dual_coefficient
+    }
+    pub fn optimal_makeup_gas(&self) -> f64 {
+        self.optimal_makeup_gas
+    }
+    pub fn optimal_current(&self) -> f64 {
+        self.optimal_current
+    }
+    pub fn optimal_x(&self) -> u32 {
+        self.optimal_x
+    }
+    pub fn optimal_y(&self) -> u32 {
+        self.optimal_y
+    }
+    pub fn transient_start(&self) -> u32 {
+        self.transient_start
+    }
+    pub fn transient_cross_talk_1(&self) -> f64 {
+        self.transient_cross_talk_1
+    }
+    pub fn transient_cross_talk_2(&self) -> f64 {
+        self.transient_cross_talk_2
+    }
+    pub fn optimal_helium(&self) -> f64 {
+        self.optimal_helium
+    }
 }
 
 impl From<CalibrationParamsXML> for CalibrationParams {
@@ -94,11 +189,27 @@ impl From<CalibrationParamsXML> for CalibrationParams {
     }
 }
 
+#[derive(Debug)]
 pub struct CalibrationChannel {
     calibration_id: u16,
     name: String,
     mean_duals: f64,
     id: u16,
+}
+
+impl CalibrationChannel {
+    pub fn calibration_id(&self) -> u16 {
+        self.calibration_id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn mean_duals(&self) -> f64 {
+        self.mean_duals
+    }
+    pub fn id(&self) -> u16 {
+        self.id
+    }
 }
 
 impl From<CalibrationChannelXML> for CalibrationChannel {
