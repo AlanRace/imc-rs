@@ -57,6 +57,15 @@ print(channel.name())
 channel_data = acquisition.channel_data(channel)
 ```
 
+### Access panorama image
+
+```python
+# Get panorama with ID = 3
+panorama = data.panorama(3)
+
+# Get optical image associated with the panorama
+image = panorama.image()
+```
 
 ### Generate `slide overview image`
 ```python

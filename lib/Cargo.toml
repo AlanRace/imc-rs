@@ -1,9 +1,10 @@
 [package]
 name = "imc-rs"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 authors = ["Alan Race <alan.race@uni-marburg.de>"]
-
+homepage = "https://github.com/AlanRace/imc-rs"
+repository = "https://github.com/AlanRace/imc-rs.git"
 
 [dependencies]
 quick-xml = "0.22.0"
