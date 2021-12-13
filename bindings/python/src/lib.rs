@@ -495,11 +495,3 @@ fn pyimc(_py: Python, m: &PyModule) -> PyResult<()> {
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}

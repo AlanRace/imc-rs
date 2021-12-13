@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Alan Race <alan.race@uni-marburg.de>"]
 readme = "README.md"
+license = "MIT"
 homepage = "https://github.com/AlanRace/imc-rs"
 repository = "https://github.com/AlanRace/imc-rs.git"
 
@@ -15,6 +16,7 @@ crate-type = ["cdylib"]
 [package.metadata.maturin]
 classifier = [
   "Programming Language :: Rust",
+  "License :: OSI Approved :: MIT License",
   "Operating System :: POSIX :: Linux",
   "Natural Language :: English",
   "Programming Language :: Python :: 3.6",
