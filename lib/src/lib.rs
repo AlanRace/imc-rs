@@ -24,7 +24,7 @@
 mod convert;
 mod error;
 pub(crate) mod mcd;
-mod transform;
+pub mod transform;
 
 mod acquisition;
 mod calibration;
@@ -142,6 +142,10 @@ impl<T: Seek + Read> MCD<T> {
             slide_fiducal_marks: HashMap::new(),
             slide_profiles: HashMap::new(),
         }
+    }
+
+    pub fn location(&self) -> &str {
+        &self.location
     }
 
     pub(crate) fn dcm_file(&self) -> PathBuf {

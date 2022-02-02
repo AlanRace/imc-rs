@@ -158,13 +158,18 @@ impl<T: Seek + Read> Slide<T> {
         read_image_data(reader, self.image_start_offset, self.image_end_offset)
     }
 
+    /// Returns the format describing the binary image data
+    pub fn image_format(&self) -> ImageFormat {
+        if self.software_version().starts_with('6') {
+            ImageFormat::Jpeg
+        } else {
+            ImageFormat::Png
+        }
+    }
+
     fn dynamic_image(&self) -> DynamicImage {
         let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
-        if self.software_version().starts_with('6') {
-            reader.set_format(ImageFormat::Jpeg);
-        } else {
-            reader.set_format(ImageFormat::Png);
-        }
+        reader.set_format(self.image_format());
         reader.decode().unwrap()
     }
 
