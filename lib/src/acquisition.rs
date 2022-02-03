@@ -321,6 +321,15 @@ impl<T: Read + Seek> Acquisition<T> {
             decompressed_data
                 .read_f32_into::<LittleEndian>(&mut data)
                 .unwrap();
+
+            for &data_point in data.iter() {
+                if data_point < min_value {
+                    min_value = data_point;
+                }
+                if data_point > max_value {
+                    max_value = data_point;
+                }
+            }
         } else {
             let offset = self.data_start_offset as u64
                 + channel.order_number() as u64 * self.value_bytes as u64;
@@ -336,10 +345,10 @@ impl<T: Read + Seek> Acquisition<T> {
 
                 *data_point = f32::from_le_bytes(buf);
 
-                if *data_point > min_value {
+                if *data_point < min_value {
                     min_value = *data_point;
                 }
-                if *data_point < max_value {
+                if *data_point > max_value {
                     max_value = *data_point;
                 }
 

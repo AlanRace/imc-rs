@@ -1,4 +1,5 @@
 /// ChannelIdentifier describes how a channel can be identified
+#[derive(Debug)]
 pub enum ChannelIdentifier {
     /// Order number of the channel (order of acquisition)
     Order(i16),

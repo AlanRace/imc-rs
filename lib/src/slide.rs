@@ -259,7 +259,7 @@ impl<T: Seek + Read> Slide<T> {
                             .unwrap();
 
                         let pixel_x = new_point[0].round() as i32;
-                        let pixel_y = height as i32 - new_point[1].round() as i32;
+                        let pixel_y = new_point[1].round() as i32;
 
                         if pixel_x < 0
                             || pixel_y < 0

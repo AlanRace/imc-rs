@@ -234,12 +234,12 @@ impl<T: Seek + Read> OnSlide for Panorama<T> {
         ));
         //moving_points.push(Vector2::new(self.slide_x4_pos_um, self.slide_y4_pos_um));
 
-        fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
+        fixed_points.push(Vector2::new(0.0, 0.0));
+        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
         fixed_points.push(Vector2::new(
             self.pixel_width as f64,
             self.pixel_height as f64,
         ));
-        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
         //fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
 
         AffineTransform::from_points(moving_points, fixed_points)
