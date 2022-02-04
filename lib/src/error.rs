@@ -3,6 +3,8 @@ use std::io;
 use lz4_flex::block::DecompressError;
 use thiserror::Error;
 
+use crate::acquisition::AcquisitionIdentifier;
+
 #[derive(Error, Debug)]
 pub enum MCDError {
     #[error("An I/O error occured")]
@@ -18,4 +20,6 @@ pub enum MCDError {
         #[from]
         source: DecompressError,
     },
+    #[error("No such channel exists for this acquisition {acquisition}")]
+    NoSuchChannel { acquisition: AcquisitionIdentifier },
 }

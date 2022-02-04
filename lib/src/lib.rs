@@ -22,7 +22,7 @@
 //! ```
 
 mod convert;
-mod error;
+pub mod error;
 pub(crate) mod mcd;
 pub mod transform;
 
@@ -271,7 +271,7 @@ impl<T: Seek + Read> MCD<T> {
             ordered_channels.push(channel);
         }
 
-        ordered_channels.sort_by_key(|a| a.order_number());
+        ordered_channels.sort_by_key(|a| a.label());
 
         ordered_channels
     }

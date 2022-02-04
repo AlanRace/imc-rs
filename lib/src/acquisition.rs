@@ -32,10 +32,27 @@ pub(crate) struct DataLocation {
     pub(crate) sizes: Vec<u64>,
 }
 
+#[derive(Debug)]
 pub enum AcquisitionIdentifier {
     Id(u16),
     Order(i16),
     Description(String),
+}
+
+impl fmt::Display for AcquisitionIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AcquisitionIdentifier::Id(id) => {
+                write!(f, "acquisition id: {}", id)
+            }
+            AcquisitionIdentifier::Order(order) => {
+                write!(f, "acquisition order: {}", order)
+            }
+            AcquisitionIdentifier::Description(description) => {
+                write!(f, "acquisition description: {}", description)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -286,7 +303,10 @@ impl<T: Read + Seek> Acquisition<T> {
     /// Returns the ChannelImage for the channel matching the `ChannelIdentifier`. This contains the intensities of the channel
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
     pub fn channel_data(&self, identifier: &ChannelIdentifier) -> Result<ChannelImage, MCDError> {
-        let channel = self.channel(identifier).unwrap();
+        let channel = self.channel(identifier).ok_or(MCDError::NoSuchChannel {
+            acquisition: AcquisitionIdentifier::Id(self.id),
+        })?;
+
         let mut data = vec![0.0f32; self.num_spectra()];
         let mut min_value = f32::MAX;
         let mut max_value = f32::MIN;
