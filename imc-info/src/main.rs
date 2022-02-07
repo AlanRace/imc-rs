@@ -1,3 +1,5 @@
+use std::io::BufReader;
+
 use clap::Parser;
 use imc_rs::MCD;
 
@@ -78,7 +80,7 @@ fn main() {
     }*/
 
     let file = std::fs::File::open(&opts.filename).unwrap();
-    let mcd = MCD::parse(file, &opts.filename);
+    let mcd = MCD::parse(BufReader::new(file), &opts.filename);
 
     // You can handle information about subcommands by requesting their matches by name
     // (as below), requesting just the name used, or both at the same time

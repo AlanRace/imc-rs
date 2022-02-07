@@ -87,7 +87,7 @@ where
         let mut matrix = Matrix3::zeros();
         matrix.m11 = *res.get((0, 0)).unwrap();
         matrix.m21 = *res.get((0, 1)).unwrap();
-        matrix.m23 = *res.get((0, 2)).unwrap();
+        matrix.m31 = *res.get((0, 2)).unwrap();
         matrix.m12 = *res.get((1, 0)).unwrap();
         matrix.m22 = *res.get((1, 1)).unwrap();
         matrix.m32 = *res.get((1, 2)).unwrap();

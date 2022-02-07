@@ -1,17 +1,16 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Seek},
+    io::{BufRead, Seek},
     sync::{Arc, Mutex},
 };
 
-use image::io::Reader as ImageReader;
-use image::{DynamicImage, ImageFormat, RgbaImage};
+use image::ImageFormat;
 use nalgebra::Vector2;
 
 use crate::{
-    images::read_image_data, mcd::PanoramaXML, transform::AffineTransform, Acquisition,
-    BoundingBox, OnSlide, OpticalImage, Print,
+    mcd::PanoramaXML, transform::AffineTransform, Acquisition, BoundingBox, OnSlide, OpticalImage,
+    Print,
 };
 
 #[derive(Debug)]
@@ -23,7 +22,7 @@ pub enum PanoramaType {
 
 /// Represents a panorama (containing one or more acquisitions)
 #[derive(Debug)]
-pub struct Panorama<T: Seek + Read> {
+pub struct Panorama<T: Seek + BufRead> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
 
     id: u16,
@@ -52,7 +51,7 @@ pub struct Panorama<T: Seek + Read> {
     acquisitions: HashMap<u16, Acquisition<T>>,
 }
 
-impl<T: Seek + Read> Panorama<T> {
+impl<T: Seek + BufRead> Panorama<T> {
     /// Returns the panorama ID
     pub fn id(&self) -> u16 {
         self.id
@@ -130,21 +129,35 @@ impl<T: Seek + Read> Panorama<T> {
         &mut self.acquisitions
     }
 
-    fn dynamic_image(&self) -> DynamicImage {
-        let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
-        reader.set_format(ImageFormat::Png);
-        reader.decode().unwrap()
-    }
-
     pub(crate) fn fix_image_dimensions(&mut self) {
         if self.has_image() && (self.pixel_width == 0 || self.pixel_height == 0) {
-            let image = self.image();
-            self.pixel_width = image.width() as i64;
-            self.pixel_height = image.height() as i64;
+            let image = self.image().unwrap();
+            let dims = image.dimensions().unwrap();
+
+            self.pixel_width = dims.0 as i64;
+            self.pixel_height = dims.1 as i64;
+        }
+    }
+
+    pub fn has_image(&self) -> bool {
+        (self.image_end_offset - self.image_start_offset) > 0
+    }
+
+    pub fn image(&self) -> Option<OpticalImage<T>> {
+        if self.has_image() {
+            Some(OpticalImage {
+                reader: self.reader.as_ref().unwrap().clone(),
+                start_offset: self.image_start_offset,
+                end_offset: self.image_end_offset,
+                image_format: self.image_format,
+            })
+        } else {
+            None
         }
     }
 }
 
+/*
 impl<T: Seek + Read> OpticalImage for Panorama<T> {
     fn has_image(&self) -> bool {
         (self.image_end_offset - self.image_start_offset) > 0
@@ -173,9 +186,9 @@ impl<T: Seek + Read> OpticalImage for Panorama<T> {
             _ => panic!("Unexpected DynamicImage type"),
         }
     }
-}
+} */
 
-impl<T: Seek + Read> OnSlide for Panorama<T> {
+impl<T: Seek + BufRead> OnSlide for Panorama<T> {
     /// Returns the bounding box encompasing the panorama image area on the slide (in μm)
     fn slide_bounding_box(&self) -> BoundingBox<f64> {
         let min_x = f64::min(
@@ -247,7 +260,7 @@ impl<T: Seek + Read> OnSlide for Panorama<T> {
 }
 
 #[rustfmt::skip]
-impl<T: Seek + Read> Print for Panorama<T> {
+impl<T: Seek + BufRead> Print for Panorama<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Panorama", 42)?;
@@ -332,13 +345,13 @@ impl<T: Seek + Read> Print for Panorama<T> {
     }
 }
 
-impl<T: Seek + Read + 'static> fmt::Display for Panorama<T> {
+impl<T: Seek + BufRead + 'static> fmt::Display for Panorama<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
 }
 
-impl<T: Seek + Read> From<PanoramaXML> for Panorama<T> {
+impl<T: Seek + BufRead> From<PanoramaXML> for Panorama<T> {
     fn from(panorama: PanoramaXML) -> Self {
         Panorama {
             reader: None,

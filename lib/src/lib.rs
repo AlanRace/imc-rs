@@ -29,7 +29,6 @@ pub mod transform;
 mod acquisition;
 mod calibration;
 mod channel;
-mod images;
 mod panorama;
 mod slide;
 
@@ -41,10 +40,12 @@ pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
 pub use self::slide::Slide;
 
+use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, Cursor, Read, Seek, SeekFrom, Write};
 
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -54,7 +55,7 @@ use acquisition::AcquisitionIdentifier;
 use calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams};
 use mcd::{MCDParser, ParserState};
 
-use image::{ImageFormat, RgbaImage};
+use image::{DynamicImage, ImageFormat, ImageResult, RgbaImage};
 use slide::{SlideFiducialMarks, SlideProfile};
 use transform::AffineTransform;
 
@@ -67,15 +68,76 @@ pub trait Print {
 }
 
 /// Represents property of having an optical image
-pub trait OpticalImage {
+pub struct OpticalImage<T: Seek + BufRead> {
+    reader: Arc<Mutex<T>>,
+
+    start_offset: i64,
+    end_offset: i64,
+    image_format: ImageFormat,
+}
+
+impl<T: Seek + BufRead> OpticalImage<T> {
     /// Returns whether an optical image is present
-    fn has_image(&self) -> bool;
+    //fn has_image(&self) -> bool;
     /// Returns the binary data for the image, exactly as stored in the .mcd file
-    fn image_data(&self) -> Result<Vec<u8>, std::io::Error>;
+    pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut reader = self.reader.lock().unwrap();
+
+        let start_offset = self.start_offset();
+        let image_size = self.image_size().try_into().unwrap();
+
+        let mut buf_u8 = vec![0; image_size];
+
+        match reader.seek(SeekFrom::Start(start_offset as u64)) {
+            Ok(_seek) => match reader.read_exact(&mut buf_u8) {
+                Ok(()) => Ok(buf_u8),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        }
+    }
+
+    fn start_offset(&self) -> i64 {
+        self.start_offset + 161
+    }
+
+    fn image_size(&self) -> i64 {
+        self.end_offset - self.start_offset()
+    }
+
     /// Returns the format of the stored optical image
-    fn image_format(&self) -> ImageFormat;
+    pub fn image_format(&self) -> ImageFormat {
+        self.image_format
+    }
+
     /// Returns a decoded RgbaImage of the panorama image
-    fn image(&self) -> RgbaImage;
+    pub fn image(&self) -> Result<RgbaImage, std::io::Error> {
+        match self.dynamic_image()? {
+            DynamicImage::ImageRgba8(rgba8) => Ok(rgba8),
+            _ => panic!("Unexpected DynamicImage type"),
+        }
+    }
+
+    pub fn dimensions(&self) -> ImageResult<(u32, u32)> {
+        let mut guard = self.reader.lock().unwrap();
+        let reader: &mut T = guard.deref_mut();
+
+        let start_offset = self.start_offset();
+        reader.seek(SeekFrom::Start(start_offset as u64));
+
+        let mut reader = ImageReader::new(reader);
+        reader.set_format(self.image_format());
+
+        reader.into_dimensions()
+    }
+
+    fn dynamic_image(&self) -> Result<DynamicImage, std::io::Error> {
+        let mut reader = ImageReader::new(Cursor::new(self.image_data()?));
+        reader.set_format(self.image_format);
+
+        // TODO: Deal with this error properly
+        Ok(reader.decode().unwrap())
+    }
 }
 
 /// Represents an image which is acquired on a slide
@@ -88,7 +150,7 @@ pub trait OnSlide {
 
 /// Represents a imaging mass cytometry (*.mcd) file.
 #[derive(Debug)]
-pub struct MCD<T: Seek + Read> {
+pub struct MCD<T: Seek + BufRead> {
     reader: Arc<Mutex<T>>,
     location: String,
 
@@ -123,7 +185,7 @@ fn u16_from_u8(a: &mut [u16], v: &[u8]) {
     }
 }
 
-impl<T: Seek + Read> MCD<T> {
+impl<T: Seek + BufRead> MCD<T> {
     fn new(reader: T, location: &str) -> Self {
         MCD {
             reader: Arc::new(Mutex::new(reader)),
@@ -423,7 +485,7 @@ impl<T: Seek + Read> MCD<T> {
 }
 
 #[rustfmt::skip]
-impl<T: Seek + Read> Print for MCD<T> {
+impl<T: Seek + BufRead> Print for MCD<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         writeln!(writer, "MCD File: {}", self.location)?;
 
@@ -456,7 +518,7 @@ impl<T: Seek + Read> Print for MCD<T> {
     }
 }
 
-impl<T: Seek + Read> fmt::Display for MCD<T> {
+impl<T: Seek + BufRead> fmt::Display for MCD<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }

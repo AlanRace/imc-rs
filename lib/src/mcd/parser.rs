@@ -131,7 +131,7 @@ pub enum ParserState {
     Finished,
 }
 
-pub struct MCDParser<T: Seek + Read> {
+pub struct MCDParser<T: Seek + BufRead> {
     pub(crate) current_mcd: Option<MCD<T>>,
 
     state: ParserState,
@@ -166,7 +166,7 @@ pub struct MCDParser<T: Seek + Read> {
     current_roi_point: Option<ROIPoint>,
 }
 
-impl<T: Seek + Read> MCDParser<T> {
+impl<T: Seek + BufRead> MCDParser<T> {
     pub fn new(mcd: MCD<T>) -> MCDParser<T> {
         MCDParser {
             current_mcd: Some(mcd),

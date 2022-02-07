@@ -4,7 +4,7 @@
 //! python bindings for imc-rs, a library for accessing imaging mass cytometry data.
 
 use imc_rs::ChannelIdentifier;
-use imc_rs::OpticalImage;
+use imc_rs::MCD;
 use numpy::ndarray::Array;
 use numpy::PyArray2;
 use pyo3::exceptions;
@@ -14,12 +14,13 @@ use pyo3::prelude::*;
 use numpy::{IntoPyArray, PyArray3};
 
 use std::fs::File;
+use std::io::BufReader;
 use std::sync::Arc;
 
 /// Mcd represents an .mcd file
 #[pyclass]
 struct Mcd {
-    mcd: Arc<imc_rs::MCD<std::fs::File>>,
+    mcd: Arc<imc_rs::MCD<BufReader<File>>>,
 }
 
 #[pymethods]
@@ -32,7 +33,7 @@ impl Mcd {
             Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
         };
 
-        let mcd = imc_rs::MCD::parse(file, filename);
+        let mcd = imc_rs::MCD::parse(BufReader::new(file), filename);
 
         Ok(Mcd { mcd: Arc::new(mcd) })
     }
@@ -46,7 +47,7 @@ impl Mcd {
             Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
         };
 
-        let mcd = imc_rs::MCD::parse_with_dcm(file, filename);
+        let mcd = imc_rs::MCD::parse_with_dcm(BufReader::new(file), filename);
 
         Ok(Mcd { mcd: Arc::new(mcd) })
     }
@@ -170,13 +171,13 @@ impl AcquisitionChannel {
 
 #[pyclass]
 struct Slide {
-    mcd: Arc<imc_rs::MCD<std::fs::File>>,
+    mcd: Arc<MCD<BufReader<File>>>,
 
     id: u16,
 }
 
 impl Slide {
-    fn get_slide(&self) -> &imc_rs::Slide<std::fs::File> {
+    fn get_slide(&self) -> &imc_rs::Slide<BufReader<File>> {
         self.mcd.slide(self.id).expect("Should be valid slide id")
     }
 }
@@ -253,7 +254,7 @@ impl Slide {
     pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let slide = self.get_slide();
 
-        let image = slide.image();
+        let image = slide.image().image().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -302,14 +303,14 @@ impl Slide {
 
 #[pyclass]
 struct Panorama {
-    mcd: Arc<imc_rs::MCD<std::fs::File>>,
+    mcd: Arc<MCD<BufReader<File>>>,
 
     id: u16,
     slide_id: u16,
 }
 
 impl Panorama {
-    fn get_panorama(&self) -> &imc_rs::Panorama<std::fs::File> {
+    fn get_panorama(&self) -> &imc_rs::Panorama<BufReader<File>> {
         self.mcd
             .slide(self.slide_id)
             .expect("Should be valid slide id")
@@ -331,7 +332,7 @@ impl Panorama {
     pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let panorama = self.get_panorama();
 
-        let image = panorama.image();
+        let image = panorama.image().unwrap().image().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -349,7 +350,7 @@ impl Panorama {
 
 #[pyclass]
 struct Acquisition {
-    mcd: Arc<imc_rs::MCD<std::fs::File>>,
+    mcd: Arc<imc_rs::MCD<BufReader<File>>>,
 
     id: u16,
     panorama_id: u16,
@@ -357,7 +358,7 @@ struct Acquisition {
 }
 
 impl Acquisition {
-    fn get_acquisition(&self) -> &imc_rs::Acquisition<std::fs::File> {
+    fn get_acquisition(&self) -> &imc_rs::Acquisition<BufReader<File>> {
         self.mcd
             .slide(self.slide_id)
             .expect("Should be valid slide id")
@@ -385,7 +386,7 @@ impl Acquisition {
     pub fn before_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let acquisition = self.get_acquisition();
 
-        let image = acquisition.before_ablation_image();
+        let image = acquisition.before_ablation_image().image().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -399,7 +400,7 @@ impl Acquisition {
     pub fn after_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let acquisition = self.get_acquisition();
 
-        let image = acquisition.after_ablation_image();
+        let image = acquisition.after_ablation_image().image().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();

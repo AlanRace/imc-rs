@@ -1,19 +1,16 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Seek},
+    io::{BufRead, Seek},
     sync::{Arc, Mutex},
 };
 
-use image::{
-    imageops::FilterType, DynamicImage, ImageBuffer, ImageFormat, RgbImage, Rgba, RgbaImage,
-};
-use image::{io::Reader as ImageReader, Pixel};
+use image::Pixel;
+use image::{imageops::FilterType, ImageBuffer, ImageFormat, Rgba, RgbaImage};
 
 use crate::{
     channel::ChannelIdentifier,
     error::MCDError,
-    images::read_image_data,
     mcd::{SlideFiducialMarksXML, SlideProfileXML},
     OnSlide, OpticalImage, Panorama, Print,
 };
@@ -22,7 +19,7 @@ use crate::mcd::SlideXML;
 
 /// Represents a slide (contains multiple panoramas) in the *.mcd format
 #[derive(Debug)]
-pub struct Slide<T: Seek + Read> {
+pub struct Slide<T: Seek + BufRead> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
 
     id: u16,
@@ -50,7 +47,7 @@ pub struct Slide<T: Seek + Read> {
     panoramas: HashMap<u16, Panorama<T>>,
 }
 
-impl<T: Seek + Read> From<SlideXML> for Slide<T> {
+impl<T: Seek + BufRead> From<SlideXML> for Slide<T> {
     fn from(slide: SlideXML) -> Self {
         Slide {
             reader: None,
@@ -78,7 +75,7 @@ impl<T: Seek + Read> From<SlideXML> for Slide<T> {
     }
 }
 
-impl<T: Seek + Read> Slide<T> {
+impl<T: Seek + BufRead> Slide<T> {
     /// Returns the slide ID
     pub fn id(&self) -> u16 {
         self.id
@@ -148,18 +145,18 @@ impl<T: Seek + Read> Slide<T> {
     }
 
     /// Returns associated image data
-    pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mutex = self
-            .reader
-            .as_ref()
-            .expect("Should have copied the reader across");
-        let reader = mutex.lock().unwrap();
+    // pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+    //     let mutex = self
+    //         .reader
+    //         .as_ref()
+    //         .expect("Should have copied the reader across");
+    //     let reader = mutex.lock().unwrap();
 
-        read_image_data(reader, self.image_start_offset, self.image_end_offset)
-    }
+    //     read_image_data(reader, self.image_start_offset, self.image_end_offset)
+    // }
 
     /// Returns the format describing the binary image data
-    pub fn image_format(&self) -> ImageFormat {
+    fn image_format(&self) -> ImageFormat {
         if self.software_version().starts_with('6') {
             ImageFormat::Jpeg
         } else {
@@ -167,19 +164,28 @@ impl<T: Seek + Read> Slide<T> {
         }
     }
 
-    fn dynamic_image(&self) -> DynamicImage {
-        let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
-        reader.set_format(self.image_format());
-        reader.decode().unwrap()
-    }
-
-    /// Returns the image associated with the slide.
-    pub fn image(&self) -> RgbImage {
-        match self.dynamic_image() {
-            DynamicImage::ImageRgb8(rgb8) => rgb8,
-            _ => panic!("Unexpected DynamicImage type"),
+    pub fn image(&self) -> OpticalImage<T> {
+        OpticalImage {
+            reader: self.reader.as_ref().unwrap().clone(),
+            start_offset: self.image_start_offset,
+            end_offset: self.image_end_offset,
+            image_format: self.image_format(),
         }
     }
+
+    // fn dynamic_image(&self) -> DynamicImage {
+    //     let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
+    //     reader.set_format(self.image_format());
+    //     reader.decode().unwrap()
+    // }
+
+    // /// Returns the image associated with the slide.
+    // pub fn image(&self) -> RgbImage {
+    //     match self.dynamic_image() {
+    //         DynamicImage::ImageRgb8(rgb8) => rgb8,
+    //         _ => panic!("Unexpected DynamicImage type"),
+    //     }
+    // }
 
     /// Create an overview image of the slide scaled to the supplied width.
     ///
@@ -191,7 +197,7 @@ impl<T: Seek + Read> Slide<T> {
         width: u32,
         channel_to_show: Option<(&ChannelIdentifier, Option<f32>)>,
     ) -> Result<RgbaImage, MCDError> {
-        let slide_image = self.dynamic_image();
+        let slide_image = self.image().dynamic_image().unwrap();
 
         // Move into function to help debugging
         /*match &slide_image {
@@ -222,7 +228,7 @@ impl<T: Seek + Read> Slide<T> {
 
         for panorama in self.panoramas() {
             if panorama.has_image() {
-                let panorama_image = panorama.image();
+                let panorama_image = panorama.image().unwrap().image().unwrap();
 
                 //let panorama_image = panorama_image.to_rgba8();
 
@@ -402,7 +408,7 @@ impl<T: Seek + Read> Slide<T> {
 }
 
 #[rustfmt::skip]
-impl<T: Seek + Read> Print for Slide<T> {
+impl<T: Seek + BufRead> Print for Slide<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Slide", 36)?;
@@ -494,7 +500,7 @@ impl<T: Seek + Read> Print for Slide<T> {
     }
 }
 
-impl<T: Seek + Read> fmt::Display for Slide<T> {
+impl<T: Seek + BufRead> fmt::Display for Slide<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }

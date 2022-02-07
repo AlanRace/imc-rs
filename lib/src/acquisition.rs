@@ -1,22 +1,20 @@
 use core::fmt;
 use std::{
     fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom},
     sync::{Arc, Mutex, MutexGuard},
 };
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use image::io::Reader as ImageReader;
-use image::{DynamicImage, ImageFormat, RgbaImage};
+use image::ImageFormat;
 use nalgebra::Vector2;
 
 use crate::{
     channel::{AcquisitionChannel, ChannelIdentifier},
     error::MCDError,
-    images::read_image_data,
     mcd::AcquisitionXML,
     transform::AffineTransform,
-    BoundingBox, ChannelImage, OnSlide, Print,
+    BoundingBox, ChannelImage, OnSlide, OpticalImage, Print,
 };
 
 #[derive(Debug)]
@@ -62,7 +60,7 @@ pub enum ProfilingType {
 
 /// Acquisition represents a single region analysed by IMC.
 #[derive(Debug)]
-pub struct Acquisition<T: Read + Seek> {
+pub struct Acquisition<T: BufRead + Seek> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
     pub(crate) dcm_location: Option<DataLocation>,
 
@@ -102,13 +100,13 @@ pub struct Acquisition<T: Read + Seek> {
     channels: Vec<AcquisitionChannel>,
 }
 
-pub struct SpectrumIterator<'a, T: Read + Seek> {
+pub struct SpectrumIterator<'a, T: BufRead + Seek> {
     acquisition: &'a Acquisition<T>,
     reader: MutexGuard<'a, T>,
     buffer: Vec<u8>,
 }
 
-impl<'a, T: Read + Seek> SpectrumIterator<'a, T> {
+impl<'a, T: BufRead + Seek> SpectrumIterator<'a, T> {
     fn new(acquisition: &'a Acquisition<T>) -> Self {
         let mut reader = acquisition.reader.as_ref().unwrap().lock().unwrap();
 
@@ -125,7 +123,7 @@ impl<'a, T: Read + Seek> SpectrumIterator<'a, T> {
     }
 }
 
-impl<'a, T: Read + Seek> Iterator for SpectrumIterator<'a, T> {
+impl<'a, T: BufRead + Seek> Iterator for SpectrumIterator<'a, T> {
     type Item = Vec<f32>;
 
     fn next(&mut self) -> Option<Vec<f32>> {
@@ -149,7 +147,7 @@ impl<'a, T: Read + Seek> Iterator for SpectrumIterator<'a, T> {
     }
 }
 
-impl<T: Read + Seek> Acquisition<T> {
+impl<T: BufRead + Seek> Acquisition<T> {
     /// Returns the ID associated with the acquisition
     pub fn id(&self) -> u16 {
         self.id
@@ -190,7 +188,7 @@ impl<T: Read + Seek> Acquisition<T> {
         self.profiling_type.as_ref()
     }
 
-    fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
+    /*fn image_data(&self, start: i64, end: i64) -> Result<Vec<u8>, std::io::Error> {
         let mutex = self
             .reader
             .as_ref()
@@ -204,27 +202,32 @@ impl<T: Read + Seek> Acquisition<T> {
         let mut reader = ImageReader::new(Cursor::new(self.image_data(start, end).unwrap()));
         reader.set_format(ImageFormat::Png);
         reader.decode().unwrap()
-    }
+    }*/
 
     /// Returns the optical image of the acquisition region prior to ablation
-    pub fn before_ablation_image(&self) -> RgbaImage {
-        match self.dynamic_image(
-            self.before_ablation_image_start_offset,
-            self.before_ablation_image_end_offset,
-        ) {
-            DynamicImage::ImageRgba8(rgba8) => rgba8,
-            _ => panic!("Unexpected DynamicImage type"),
+    pub fn before_ablation_image(&self) -> OpticalImage<T> {
+        OpticalImage {
+            reader: self.reader.as_ref().unwrap().clone(),
+            start_offset: self.before_ablation_image_start_offset,
+            end_offset: self.before_ablation_image_end_offset,
+            image_format: ImageFormat::Png,
         }
+        // match self.dynamic_image(
+        //     self.before_ablation_image_start_offset,
+        //     self.before_ablation_image_end_offset,
+        // ) {
+        //     DynamicImage::ImageRgba8(rgba8) => rgba8,
+        //     _ => panic!("Unexpected DynamicImage type"),
+        // }
     }
 
     /// Returns the optical image of the acquisition region after ablation
-    pub fn after_ablation_image(&self) -> RgbaImage {
-        match self.dynamic_image(
-            self.after_ablation_image_start_offset,
-            self.after_ablation_image_end_offset,
-        ) {
-            DynamicImage::ImageRgba8(rgba8) => rgba8,
-            _ => panic!("Unexpected DynamicImage type"),
+    pub fn after_ablation_image(&self) -> OpticalImage<T> {
+        OpticalImage {
+            reader: self.reader.as_ref().unwrap().clone(),
+            start_offset: self.after_ablation_image_start_offset,
+            end_offset: self.after_ablation_image_end_offset,
+            image_format: ImageFormat::Png,
         }
     }
 
@@ -425,7 +428,7 @@ impl<T: Read + Seek> Acquisition<T> {
     }
 }
 
-impl<T: Seek + Read> OnSlide for Acquisition<T> {
+impl<T: Seek + BufRead> OnSlide for Acquisition<T> {
     /// Returns the affine transformation from pixel coordinates within the acquisition to to the slide coordinates (μm)
     fn to_slide_transform(&self) -> AffineTransform<f64> {
         let mut moving_points = Vec::new();
@@ -489,7 +492,7 @@ impl<T: Seek + Read> OnSlide for Acquisition<T> {
 }
 
 #[rustfmt::skip]
-impl<T: Seek + Read> Print for Acquisition<T> {
+impl<T: Seek + BufRead> Print for Acquisition<T> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Acquisition", 48)?;
@@ -626,13 +629,13 @@ impl<T: Seek + Read> Print for Acquisition<T> {
     }
 }
 
-impl<T: Seek + Read> fmt::Display for Acquisition<T> {
+impl<T: Seek + BufRead> fmt::Display for Acquisition<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
 }
 
-impl<T: Seek + Read> From<AcquisitionXML> for Acquisition<T> {
+impl<T: Seek + BufRead> From<AcquisitionXML> for Acquisition<T> {
     fn from(acquisition: AcquisitionXML) -> Self {
         Acquisition {
             reader: None,

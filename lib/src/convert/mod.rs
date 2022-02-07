@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
 
@@ -152,7 +152,7 @@ impl Write for TemporaryFile {
     }
 }
 
-pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
+pub fn convert<T: BufRead + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
     let mut acquisition_offsets = HashMap::new();
     //println!("Opening {:?} for writing", mcd.dcm_file());
     let dcm_file = std::fs::File::create(mcd.dcm_file()).unwrap();
@@ -268,7 +268,7 @@ pub fn convert<T: Read + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn open<T: Read + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
+pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
     //println!("Opening {:?} for reading", mcd.dcm_file());
     let dcm_file = std::fs::File::open(mcd.dcm_file()).unwrap();
     let dcm_file_arc = Arc::new(Mutex::new(BufReader::new(dcm_file)));
