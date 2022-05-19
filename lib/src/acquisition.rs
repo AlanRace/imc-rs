@@ -445,26 +445,28 @@ impl<T: Seek + BufRead> OnSlide for Acquisition<T> {
 
         moving_points.push(Vector2::new(
             self.roi_start_x_pos_um,
-            25000.0 - self.roi_start_y_pos_um,
+            self.roi_start_y_pos_um,
+            //25000.0 - self.roi_start_y_pos_um,
         ));
         moving_points.push(Vector2::new(
             roi_end_x_pos_um,
-            25000.0 - self.roi_start_y_pos_um,
+            self.roi_start_y_pos_um,
+            //25000.0 - self.roi_start_y_pos_um,
         ));
         moving_points.push(Vector2::new(
             self.roi_start_x_pos_um,
-            25000.0 - self.roi_end_y_pos_um,
+            self.roi_end_y_pos_um,
+            //25000.0 - self.roi_end_y_pos_um,
         ));
         //moving_points.push(Vector2::new(roi_end_x_pos_um, self.roi_end_y_pos_um));
 
-        fixed_points.push(Vector2::new(0.0, 0.0));
-        fixed_points.push(Vector2::new(self.max_x as f64, 0.0));
+        let y = (self.roi_start_y_pos_um - self.roi_end_y_pos_um)
+            / self.ablation_distance_between_shots_y;
+
+        fixed_points.push(Vector2::new(0.0, y));
+        fixed_points.push(Vector2::new(self.max_x as f64, y));
         //fixed_points.push(Vector2::new(0.0, self.max_y as f64));
-        fixed_points.push(Vector2::new(
-            0.0,
-            (self.roi_start_y_pos_um - self.roi_end_y_pos_um)
-                / self.ablation_distance_between_shots_y,
-        ));
+        fixed_points.push(Vector2::new(0.0, 0.0));
 
         //fixed_points.push(Vector2::new(self.max_x as f64, self.max_y as f64));
 

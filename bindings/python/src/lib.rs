@@ -33,7 +33,7 @@ impl Mcd {
             Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
         };
 
-        let mcd = imc_rs::MCD::parse(BufReader::new(file), filename);
+        let mcd = imc_rs::MCD::parse(BufReader::new(file), filename)?;
 
         Ok(Mcd { mcd: Arc::new(mcd) })
     }
@@ -47,7 +47,7 @@ impl Mcd {
             Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
         };
 
-        let mcd = imc_rs::MCD::parse_with_dcm(BufReader::new(file), filename);
+        let mcd = imc_rs::MCD::parse_with_dcm(BufReader::new(file), filename)?;
 
         Ok(Mcd { mcd: Arc::new(mcd) })
     }

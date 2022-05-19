@@ -31,6 +31,6 @@ imc-rs = { path = "../../lib" }
 numpy = "0.15"
 
 [dependencies.pyo3]
-version = "0.15.1"
+version = "0.15"
 features = ["extension-module"]
 

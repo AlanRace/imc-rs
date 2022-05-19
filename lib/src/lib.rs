@@ -22,8 +22,10 @@
 //! ```
 
 mod convert;
+/// Errors associated with parsing IMC data
 pub mod error;
 pub(crate) mod mcd;
+/// Transformations (e.g. affine) used for converting
 pub mod transform;
 
 mod acquisition;
@@ -43,7 +45,7 @@ pub use self::slide::Slide;
 use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
-use std::io::{BufRead, Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, Cursor, Seek, SeekFrom, Write};
 
 use std::ops::DerefMut;
 use std::path::PathBuf;
@@ -118,12 +120,13 @@ impl<T: Seek + BufRead> OpticalImage<T> {
         }
     }
 
+    /// Returns the dimensions of the images in pixels as a tuple (width, height)
     pub fn dimensions(&self) -> ImageResult<(u32, u32)> {
         let mut guard = self.reader.lock().unwrap();
         let reader: &mut T = guard.deref_mut();
 
         let start_offset = self.start_offset();
-        reader.seek(SeekFrom::Start(start_offset as u64));
+        reader.seek(SeekFrom::Start(start_offset as u64))?;
 
         let mut reader = ImageReader::new(reader);
         reader.set_format(self.image_format());
@@ -206,6 +209,7 @@ impl<T: Seek + BufRead> MCD<T> {
         }
     }
 
+    /// Returns the location (path) of the .mcd file
     pub fn location(&self) -> &str {
         &self.location
     }
@@ -369,12 +373,12 @@ impl<T: Seek + BufRead> MCD<T> {
     }
 
     /// Parse *.mcd format
-    pub fn parse(reader: T, location: &str) -> Self {
+    pub fn parse(reader: T, location: &str) -> std::io::Result<Self> {
         let mut mcd = MCD::new(reader, location);
-        let combined_xml = mcd.xml();
+        let combined_xml = mcd.xml()?;
 
-        let mut file = std::fs::File::create("tmp.xml").unwrap();
-        file.write_all(combined_xml.as_bytes()).unwrap();
+        // let mut file = std::fs::File::create("tmp.xml").unwrap();
+        // file.write_all(combined_xml.as_bytes())?;
 
         let mut parser = MCDParser::new(mcd);
 
@@ -413,7 +417,7 @@ impl<T: Seek + BufRead> MCD<T> {
             buf.clear();
         }
 
-        parser.mcd()
+        Ok(parser.mcd())
     }
 
     /// Parse *.mcd format where a temporary file is generated for faster access to channel images.
@@ -421,20 +425,20 @@ impl<T: Seek + BufRead> MCD<T> {
     /// Data is stored in the *.mcd file spectrum-wise which means to load a single image, the entire acquired acquisition must be loaded first.
     /// This method creates a temporary file (*.dcm) in the same location as the *.mcd file (if it doesn't already exist) which has the channel
     /// data stored image-wise. If this file is present and loaded, then `Mcd` will choose the fastest method to use to return the requested data.
-    pub fn parse_with_dcm(reader: T, location: &str) -> Self {
-        let mut mcd = Self::parse(reader, location);
+    pub fn parse_with_dcm(reader: T, location: &str) -> std::io::Result<Self> {
+        let mut mcd = Self::parse(reader, location)?;
 
         if std::fs::metadata(mcd.dcm_file()).is_err() {
             convert::convert(&mcd).unwrap();
         }
 
-        convert::open(&mut mcd).unwrap();
+        convert::open(&mut mcd)?;
 
-        mcd
+        Ok(mcd)
     }
 
     /// Returns the raw XML metadata stored in the .mcd file
-    pub fn xml(&mut self) -> String {
+    pub fn xml(&mut self) -> std::io::Result<String> {
         let chunk_size: i64 = 1000;
         let mut cur_offset: i64 = 0;
 
@@ -443,11 +447,9 @@ impl<T: Seek + BufRead> MCD<T> {
         loop {
             let mut reader = self.reader.lock().unwrap();
 
-            reader
-                .seek(SeekFrom::End(-cur_offset - chunk_size))
-                .unwrap();
+            reader.seek(SeekFrom::End(-cur_offset - chunk_size))?;
 
-            reader.read_exact(&mut buf_u8).unwrap();
+            reader.read_exact(&mut buf_u8)?;
 
             match std::str::from_utf8(&buf_u8) {
                 Ok(_data) => {}
@@ -458,8 +460,8 @@ impl<T: Seek + BufRead> MCD<T> {
                     let total_size = cur_offset + chunk_size - (start_index as i64);
                     buf_u8 = vec![0; total_size.try_into().unwrap()];
 
-                    reader.seek(SeekFrom::End(-total_size)).unwrap();
-                    reader.read_exact(&mut buf_u8).unwrap();
+                    reader.seek(SeekFrom::End(-total_size))?;
+                    reader.read_exact(&mut buf_u8)?;
 
                     break;
                 }
@@ -480,7 +482,7 @@ impl<T: Seek + BufRead> MCD<T> {
             }
         }
 
-        combined_xml
+        Ok(combined_xml)
     }
 }
 
@@ -596,7 +598,7 @@ mod tests {
 
     #[test]
     fn test_all_in_folder() -> std::io::Result<()> {
-        let paths = std::fs::read_dir("../test/").unwrap();
+        let paths = std::fs::read_dir("/home/alan/Documents/Work/Nicole/Salmonella").unwrap();
 
         for path in paths {
             let path = path?;
@@ -607,9 +609,15 @@ mod tests {
             }
 
             let file = BufReader::new(File::open(path.path()).unwrap());
-            let mut mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap());
+            let mut mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap())?;
 
-            let _xml = mcd.xml();
+            let overview_image = mcd.slides()[0].create_overview_image(7500, None).unwrap();
+
+            overview_image.save("overview.png").unwrap();
+
+            return Ok(());
+
+            //let _xml = mcd.xml()?;
 
             //println!("{}", xml);
 
@@ -641,11 +649,6 @@ mod tests {
             }
 
             let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
-            let overview_image = mcd.slides()[0]
-                .create_overview_image(15000, Some((&channel_identifier, Some(100.0))))
-                .unwrap();
-
-            overview_image.save("overview.png").unwrap();
         }
 
         Ok(())

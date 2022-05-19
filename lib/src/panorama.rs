@@ -233,26 +233,22 @@ impl<T: Seek + BufRead> OnSlide for Panorama<T> {
         let mut moving_points = Vec::new();
         let mut fixed_points = Vec::new();
 
-        moving_points.push(Vector2::new(
-            self.slide_x1_pos_um,
-            25000.0 - self.slide_y1_pos_um,
-        ));
-        moving_points.push(Vector2::new(
-            self.slide_x2_pos_um,
-            25000.0 - self.slide_y2_pos_um,
-        ));
-        moving_points.push(Vector2::new(
-            self.slide_x3_pos_um,
-            25000.0 - self.slide_y3_pos_um,
-        ));
+        moving_points.push(Vector2::new(self.slide_x1_pos_um, self.slide_y1_pos_um));
+        moving_points.push(Vector2::new(self.slide_x2_pos_um, self.slide_y2_pos_um));
+        moving_points.push(Vector2::new(self.slide_x3_pos_um, self.slide_y3_pos_um));
         //moving_points.push(Vector2::new(self.slide_x4_pos_um, self.slide_y4_pos_um));
 
-        fixed_points.push(Vector2::new(0.0, 0.0));
-        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
+        // println!(
+        //     "slide {} {} {}",
+        //     self.slide_y1_pos_um, self.slide_y2_pos_um, self.slide_y3_pos_um
+        // );
+
+        fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
         fixed_points.push(Vector2::new(
             self.pixel_width as f64,
             self.pixel_height as f64,
         ));
+        fixed_points.push(Vector2::new(self.pixel_width as f64, 0.0));
         //fixed_points.push(Vector2::new(0.0, self.pixel_height as f64));
 
         AffineTransform::from_points(moving_points, fixed_points)

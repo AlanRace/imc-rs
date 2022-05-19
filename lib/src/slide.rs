@@ -219,12 +219,17 @@ impl<T: Seek + BufRead> Slide<T> {
 
         println!("Saved !");*/
 
+        let ratio = self.height_in_um() / self.width_in_um();
+        let output_image_height = (width as f64 * ratio) as u32;
+
         let mut resized_image = slide_image
             .resize_exact(width, width / 3, FilterType::Nearest)
             .to_rgba8();
         //println!("Resized !");
 
-        let scale = 75000.0 / width as f64;
+        //return Ok(slide_image.to_rgba8());
+
+        let scale = self.width_in_um() / width as f64;
 
         for panorama in self.panoramas() {
             if panorama.has_image() {
@@ -265,7 +270,7 @@ impl<T: Seek + BufRead> Slide<T> {
                             .unwrap();
 
                         let pixel_x = new_point[0].round() as i32;
-                        let pixel_y = new_point[1].round() as i32;
+                        let pixel_y = panorama_image.height() as i32 - new_point[1].round() as i32;
 
                         if pixel_x < 0
                             || pixel_y < 0
@@ -277,7 +282,7 @@ impl<T: Seek + BufRead> Slide<T> {
 
                         let pixel = *panorama_image.get_pixel(pixel_x as u32, pixel_y as u32);
 
-                        resized_image.put_pixel(x, y, pixel);
+                        resized_image.put_pixel(x, output_image_height - y, pixel);
                     }
                 }
 
