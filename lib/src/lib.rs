@@ -113,11 +113,13 @@ impl<T: Seek + BufRead> OpticalImage<T> {
     }
 
     /// Returns a decoded RgbaImage of the panorama image
-    pub fn image(&self) -> Result<RgbaImage, std::io::Error> {
-        match self.dynamic_image()? {
-            DynamicImage::ImageRgba8(rgba8) => Ok(rgba8),
-            _ => panic!("Unexpected DynamicImage type"),
-        }
+    pub fn as_rgba8(&self) -> Result<RgbaImage, std::io::Error> {
+        // match self.dynamic_image()? {
+        //     DynamicImage::ImageRgba8(rgba8) => Ok(rgba8),
+        //     DynamicImage::ImageRgb8(rgb8) => Ok(DynamicImage::ImageRgb8(rgb8).into_rgba8()),
+        //     _ => panic!("Unexpected DynamicImage type"),
+        // }
+        Ok(self.dynamic_image()?.into_rgba8())
     }
 
     /// Returns the dimensions of the images in pixels as a tuple (width, height)

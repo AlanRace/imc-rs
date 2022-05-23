@@ -233,7 +233,7 @@ impl<T: Seek + BufRead> Slide<T> {
 
         for panorama in self.panoramas() {
             if panorama.has_image() {
-                let panorama_image = panorama.image().unwrap().image().unwrap();
+                let panorama_image = panorama.image().unwrap().as_rgba8().unwrap();
 
                 //let panorama_image = panorama_image.to_rgba8();
 
