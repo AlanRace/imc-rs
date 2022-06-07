@@ -28,9 +28,9 @@ classifier = [
 
 [dependencies]
 imc-rs = { path = "../../lib" }
-numpy = "0.15"
+numpy = "0.16"
 
 [dependencies.pyo3]
-version = "0.15"
+version = "0.16"
 features = ["extension-module"]
 

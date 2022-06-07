@@ -254,7 +254,7 @@ impl Slide {
     pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let slide = self.get_slide();
 
-        let image = slide.image().image().unwrap();
+        let image = slide.image().as_rgba8().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -332,7 +332,7 @@ impl Panorama {
     pub fn image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let panorama = self.get_panorama();
 
-        let image = panorama.image().unwrap().image().unwrap();
+        let image = panorama.image().unwrap().as_rgba8().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -386,7 +386,7 @@ impl Acquisition {
     pub fn before_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let acquisition = self.get_acquisition();
 
-        let image = acquisition.before_ablation_image().image().unwrap();
+        let image = acquisition.before_ablation_image().as_rgba8().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
@@ -400,7 +400,7 @@ impl Acquisition {
     pub fn after_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let acquisition = self.get_acquisition();
 
-        let image = acquisition.after_ablation_image().image().unwrap();
+        let image = acquisition.after_ablation_image().as_rgba8().unwrap();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let raw_image = image.into_raw();
