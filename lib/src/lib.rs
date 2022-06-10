@@ -45,7 +45,7 @@ pub use self::slide::Slide;
 use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
-use std::io::{BufRead, Cursor, Seek, SeekFrom, Write};
+use std::io::{BufRead, Cursor, Seek, SeekFrom};
 
 use std::ops::DerefMut;
 use std::path::PathBuf;
@@ -611,13 +611,11 @@ mod tests {
             }
 
             let file = BufReader::new(File::open(path.path()).unwrap());
-            let mut mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap())?;
+            let mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap())?;
 
             let overview_image = mcd.slides()[0].create_overview_image(7500, None).unwrap();
 
             overview_image.save("overview.png").unwrap();
-
-            return Ok(());
 
             //let _xml = mcd.xml()?;
 
@@ -650,7 +648,7 @@ mod tests {
                 );
             }
 
-            let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
+            //let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
         }
 
         Ok(())

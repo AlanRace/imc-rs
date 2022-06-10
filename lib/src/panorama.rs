@@ -139,14 +139,16 @@ impl<T: Seek + BufRead> Panorama<T> {
         }
     }
 
+    /// Returns true if an image is associated with this panorama
     pub fn has_image(&self) -> bool {
         (self.image_end_offset - self.image_start_offset) > 0
     }
 
+    /// Returns the optical image
     pub fn image(&self) -> Option<OpticalImage<T>> {
         if self.has_image() {
             Some(OpticalImage {
-                reader: self.reader.as_ref().unwrap().clone(),
+                reader: self.reader.as_ref()?.clone(),
                 start_offset: self.image_start_offset,
                 end_offset: self.image_end_offset,
                 image_format: self.image_format,

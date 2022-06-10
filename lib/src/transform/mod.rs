@@ -3,12 +3,15 @@ extern crate num_traits;
 use nalgebra::{DMatrix, Dim, Matrix3, VecStorage, Vector2, Vector3, QR};
 
 #[derive(Debug)]
+/// Describes the direction in which the transform is performed
 pub enum Direction {
+    /// Slide is "fixed" and the transform describes transformation from another space to the slide space
     ToSlide,
+    /// Slide is "moving" and the transform describes transformation from slide space to another space
     FromSlide,
 }
 
-// Create a trait which captures necessary traits for matrix multiplication
+/// Create a trait which captures necessary traits for matrix multiplication
 pub trait TransformScalar:
     nalgebra::Scalar
     + num_traits::identities::Zero

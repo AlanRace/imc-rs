@@ -164,6 +164,7 @@ impl<T: Seek + BufRead> Slide<T> {
         }
     }
 
+    /// Returns the image associated with the slide
     pub fn image(&self) -> OpticalImage<T> {
         OpticalImage {
             reader: self.reader.as_ref().unwrap().clone(),
