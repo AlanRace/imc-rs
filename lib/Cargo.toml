@@ -9,8 +9,7 @@ repository = "https://github.com/AlanRace/imc-rs.git"
 
 [dependencies]
 quick-xml = "0.23.0"
-nalgebra = "0.31.0" # Higher versions run into bug with rust-analyzer
-#nalgebra = "0.30.1"
+nalgebra = "0.31.0" 
 num-traits = "0.2"
 image = "0.24"
 lz4_flex = { version = "0.9.3" }

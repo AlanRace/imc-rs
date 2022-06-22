@@ -37,11 +37,12 @@ mod slide;
 /// Provides methods for reading in cell segmentation data from Halo
 pub mod halo;
 
-pub use self::acquisition::Acquisition;
+pub use self::acquisition::{Acquisition, AcquisitionIdentifier};
 pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
 pub use self::slide::Slide;
 
+use error::MCDError;
 use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
@@ -53,7 +54,6 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
 
-use acquisition::AcquisitionIdentifier;
 use calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams};
 use mcd::{MCDParser, ParserState};
 
@@ -151,6 +151,13 @@ pub trait OnSlide {
     fn slide_bounding_box(&self) -> BoundingBox<f64>;
     /// Returns the affine transformation from pixel coordinates within the image to to the slide coordinates (μm)
     fn to_slide_transform(&self) -> AffineTransform<f64>;
+}
+
+pub struct Region {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Represents a imaging mass cytometry (*.mcd) file.
@@ -344,6 +351,39 @@ impl<T: Seek + BufRead> MCD<T> {
         ordered_channels
     }
 
+    /// Returns a vector of all channels, excluding those from the acquisitions with names matching those specified
+    pub fn channels_excluding(&self, exclusion_list: Vec<&str>) -> Vec<&AcquisitionChannel> {
+        let mut channels = HashMap::new();
+
+        // This should be unnecessary - hopefully there is only one set of channels per dataset?
+        for slide in self.slides.values() {
+            for panorama in slide.panoramas() {
+                for acquisition in panorama.acquisitions() {
+                    if !exclusion_list.contains(&acquisition.description()) {
+                        for channel in acquisition.channels() {
+                            if !channels.contains_key(channel.name())
+                                && channel.name() != "X"
+                                && channel.name() != "Y"
+                                && channel.name() != "Z"
+                            {
+                                channels.insert(channel.name(), channel);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut ordered_channels = Vec::new();
+        for (_, channel) in channels.drain() {
+            ordered_channels.push(channel);
+        }
+
+        ordered_channels.sort_by_key(|a| a.label().to_ascii_lowercase());
+
+        ordered_channels
+    }
+
     /// Returns an instance of `CalibrationFinal` with the specified ID, or None if none exists (this is always the case in version 1 of the Schema)
     pub fn calibration_final(&self, id: u16) -> Option<&CalibrationFinal> {
         self.calibration_finals.get(&id)
@@ -427,7 +467,7 @@ impl<T: Seek + BufRead> MCD<T> {
     /// Data is stored in the *.mcd file spectrum-wise which means to load a single image, the entire acquired acquisition must be loaded first.
     /// This method creates a temporary file (*.dcm) in the same location as the *.mcd file (if it doesn't already exist) which has the channel
     /// data stored image-wise. If this file is present and loaded, then `Mcd` will choose the fastest method to use to return the requested data.
-    pub fn parse_with_dcm(reader: T, location: &str) -> std::io::Result<Self> {
+    pub fn parse_with_dcm(reader: T, location: &str) -> Result<Self, MCDError> {
         let mut mcd = Self::parse(reader, location)?;
 
         if std::fs::metadata(mcd.dcm_file()).is_err() {
@@ -551,8 +591,8 @@ pub struct BoundingBox<T> {
 /// Represents a channel image (stored as a vector of f32).
 /// If the run was stopped mid acquisition width*height != valid_pixels
 pub struct ChannelImage {
-    width: i32,
-    height: i32,
+    region: Region,
+
     range: (f32, f32),
     valid_pixels: usize,
     data: Vec<f32>,
@@ -560,13 +600,13 @@ pub struct ChannelImage {
 
 impl ChannelImage {
     /// Returns the width (in pixels) of the image
-    pub fn width(&self) -> i32 {
-        self.width
+    pub fn width(&self) -> u32 {
+        self.region.width
     }
 
     /// Returns the height (in pixels) of the image
-    pub fn height(&self) -> i32 {
-        self.height
+    pub fn height(&self) -> u32 {
+        self.region.height
     }
 
     /// Returns a pair (min, max) of f32 describing the limits of the detected intensities in the image
@@ -576,7 +616,7 @@ impl ChannelImage {
 
     /// Returns whether the data is complete (true) or whether the data acquisition aborted (false)
     pub fn is_complete(&self) -> bool {
-        self.valid_pixels == (self.width * self.height) as usize
+        self.valid_pixels == (self.region.width * self.region.height) as usize
     }
 
     /// Returns the number of valid pixels in the image. If the run was aborted part way through `num_valid_pixels() < width() * height()`
@@ -592,14 +632,17 @@ impl ChannelImage {
 
 #[cfg(test)]
 mod tests {
+    use image::{ImageBuffer, Pixel, Rgba};
+
     use super::*;
 
     use std::fs::File;
 
     use std::io::BufReader;
+    use std::time::Instant;
 
     #[test]
-    fn test_all_in_folder() -> std::io::Result<()> {
+    fn test_all_in_folder() -> Result<(), MCDError> {
         let paths = std::fs::read_dir("/home/alan/Documents/Work/Nicole/Salmonella").unwrap();
 
         for path in paths {
@@ -613,9 +656,9 @@ mod tests {
             let file = BufReader::new(File::open(path.path()).unwrap());
             let mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap())?;
 
-            let overview_image = mcd.slides()[0].create_overview_image(7500, None).unwrap();
+            // let overview_image = mcd.slides()[0].create_overview_image(7500, None).unwrap();
 
-            overview_image.save("overview.png").unwrap();
+            // overview_image.save("overview.png").unwrap();
 
             //let _xml = mcd.xml()?;
 
@@ -634,12 +677,12 @@ mod tests {
                 .unwrap();
 
             let x_channel = acquisition
-                .channel_data(&ChannelIdentifier::Name("X".to_string()))
+                .channel_data(&ChannelIdentifier::Name("X".to_string()), None)
                 .unwrap();
 
             println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
 
-            for channel in acquisition.channels() {
+            for channel in mcd.channels_excluding(vec!["ROI 12", "ROI 13", "ROI 14", "ROI 16"]) {
                 println!(
                     "[Channel {}] {} | {}",
                     channel.id(),
@@ -648,9 +691,67 @@ mod tests {
                 );
             }
 
-            //let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
+            let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
+            println!("Subimage");
+            let data = acquisition.channel_data(
+                &channel_identifier,
+                None, // Some(Region {
+                      //     x: 1000,
+                      //     y: 1000,
+                      //     width: 500,
+                      //     height: 500,
+                      // }),
+            )?;
+
+            let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                ImageBuffer::new(data.width(), data.height());
+
+            let mut index = 0;
+            let max_value = 20.0;
+            for y in 0..data.height() {
+                if index >= data.valid_pixels {
+                    break;
+                }
+
+                for x in 0..data.width() {
+                    if index >= data.valid_pixels {
+                        break;
+                    }
+
+                    let g = ((data.data[index] / max_value) * 255.0) as u8;
+                    let g = g as f64 / 255.0;
+
+                    let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                    cur_pixel[1] = (g * 255.0) as u8;
+                    cur_pixel[3] = 255;
+
+                    index += 1;
+                }
+            }
+
+            acq_image.save("dna.png").unwrap();
+
+            let start = Instant::now();
+            let mut image_map = HashMap::new();
+
+            for acquisition in mcd.acquisitions() {
+                match acquisition.channel_data(&channel_identifier, None) {
+                    Ok(data) => {
+                        image_map.insert(format!("{}", acquisition.id()), ChannelImage(data));
+                    }
+                    Err(_) => {
+                        // No such channel, so we don't add data
+                    }
+                }
+            }
+
+            let duration = start.elapsed();
+
+            println!("Time elapsed loading data is: {:?}", duration);
         }
 
         Ok(())
     }
+
+    pub struct ChannelImage(crate::ChannelImage);
 }

@@ -11,10 +11,11 @@ use nalgebra::Vector2;
 
 use crate::{
     channel::{AcquisitionChannel, ChannelIdentifier},
+    convert::DCMLocation,
     error::MCDError,
     mcd::AcquisitionXML,
     transform::AffineTransform,
-    BoundingBox, ChannelImage, OnSlide, OpticalImage, Print,
+    BoundingBox, ChannelImage, OnSlide, OpticalImage, Print, Region,
 };
 
 #[derive(Debug)]
@@ -22,13 +23,13 @@ pub enum DataFormat {
     Float,
 }
 
-#[derive(Debug)]
-pub(crate) struct DataLocation {
-    pub(crate) reader: Arc<Mutex<BufReader<File>>>,
+// #[derive(Debug)]
+// pub struct DataLocation {
+//     pub reader: Arc<Mutex<BufReader<File>>>,
 
-    pub(crate) offsets: Vec<u64>,
-    pub(crate) sizes: Vec<u64>,
-}
+//     pub offsets: Vec<u64>,
+//     pub sizes: Vec<u64>,
+// }
 
 #[derive(Debug)]
 pub enum AcquisitionIdentifier {
@@ -62,7 +63,7 @@ pub enum ProfilingType {
 #[derive(Debug)]
 pub struct Acquisition<T: BufRead + Seek> {
     pub(crate) reader: Option<Arc<Mutex<T>>>,
-    pub(crate) dcm_location: Option<DataLocation>,
+    pub(crate) dcm_location: Option<DCMLocation>,
 
     id: u16,
     description: String,
@@ -305,45 +306,47 @@ impl<T: BufRead + Seek> Acquisition<T> {
 
     /// Returns the ChannelImage for the channel matching the `ChannelIdentifier`. This contains the intensities of the channel
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
-    pub fn channel_data(&self, identifier: &ChannelIdentifier) -> Result<ChannelImage, MCDError> {
+    pub fn channel_data(
+        &self,
+        identifier: &ChannelIdentifier,
+        region: Option<Region>,
+    ) -> Result<ChannelImage, MCDError> {
         let channel = self.channel(identifier).ok_or(MCDError::NoSuchChannel {
             acquisition: AcquisitionIdentifier::Id(self.id),
         })?;
 
-        let mut data = vec![0.0f32; self.num_spectra()];
+        let region = match region {
+            Some(region) => region,
+            None => crate::Region {
+                x: 0,
+                y: 0,
+                width: self.width() as u32,
+                height: self.height() as u32,
+            },
+        };
+
+        let last_row = self.num_spectra() / self.width() as usize;
+        let last_col = self.width() as usize - (self.num_spectra() % self.width() as usize);
+
+        let valid_region_row = (region.y + region.height).min(last_row as u32);
+        let valid_region_col = (region.x + region.width).min(last_col as u32);
+
+        let valid_pixels =
+            ((valid_region_row - region.y) * region.width) + (valid_region_col - region.x);
+
+        println!(
+            "Valid pixels: {} | {} {}",
+            valid_pixels, valid_region_row, valid_region_col
+        );
+
+        let mut data = vec![0.0; valid_pixels as usize];
         let mut min_value = f32::MAX;
         let mut max_value = f32::MIN;
 
         //println!("DCM Location: {:?}", self.dcm_location);
 
         if let Some(data_location) = &self.dcm_location {
-            let mut reader = data_location.reader.lock().unwrap();
-
-            let offset = data_location.offsets[channel.order_number() as usize];
-            let mut buf = vec![0; data_location.sizes[channel.order_number() as usize] as usize];
-
-            /*println!("About to read channel {:?}", channel);
-            println!(
-                "[Order number: {}] Offset {} and buffer length {} with num spectra {}",
-                channel.order_number(),
-                offset,
-                buf.len(),
-                self.num_spectra()
-            );*/
-
-            reader.seek(SeekFrom::Start(offset)).unwrap();
-            reader.read_exact(&mut buf).unwrap();
-
-            let decompressed_data = lz4_flex::decompress(&buf, self.num_spectra() * 4);
-            if let Err(error) = decompressed_data {
-                return Err(MCDError::from(error));
-            }
-            let decompressed_data = decompressed_data.unwrap();
-            let mut decompressed_data = Cursor::new(decompressed_data);
-
-            decompressed_data
-                .read_f32_into::<LittleEndian>(&mut data)
-                .unwrap();
+            data = data_location.read_channel(channel.order_number() as usize, &region)?;
 
             for &data_point in data.iter() {
                 if data_point < min_value {
@@ -361,10 +364,9 @@ impl<T: BufRead + Seek> Acquisition<T> {
             // TODO: Currently this only works for f32
             let mut buf = [0; 4];
 
-            // TODO: Handle this properly without unwrapping
-            reader.seek(SeekFrom::Start(offset)).unwrap();
+            reader.seek(SeekFrom::Start(offset))?;
             for data_point in data.iter_mut() {
-                reader.read_exact(&mut buf).unwrap();
+                reader.read_exact(&mut buf)?;
 
                 *data_point = f32::from_le_bytes(buf);
 
@@ -375,17 +377,14 @@ impl<T: BufRead + Seek> Acquisition<T> {
                     max_value = *data_point;
                 }
 
-                reader
-                    .seek(SeekFrom::Current(self.spectrum_size() as i64 - 4))
-                    .unwrap();
+                reader.seek(SeekFrom::Current(self.spectrum_size() as i64 - 4))?;
             }
         }
 
         Ok(ChannelImage {
-            width: self.max_x,
-            height: self.max_y,
+            region,
             range: (min_value, max_value),
-            valid_pixels: self.num_spectra(),
+            valid_pixels: valid_pixels as usize,
             data,
         })
     }

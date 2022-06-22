@@ -1,14 +1,13 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use rand::prelude::*;
 
-use crate::{acquisition::DataLocation, MCD};
+use crate::{error::MCDError, Acquisition, Region, MCD};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -18,144 +17,79 @@ struct AcquisitionOffset {
     sizes: Vec<u64>,
 }
 
-enum Mode {
-    None,
-    Reading(BufReader<File>),
-    Writing(BufWriter<File>),
+// Format
+// -----------
+// chunk size (u8)
+// number of acquisitions (u8)
+// offsets for each acquisition ((u16, u64, u8))
+
+#[derive(Debug)]
+struct AcquisitionDetails {
+    width: u32,
+    height: u32,
+    num_spectra: u32,
+
+    chunk_size: u32,
+
+    chunks: Vec<PixelChunk>,
 }
 
-struct TemporaryFile {
-    name: String,
+impl AcquisitionDetails {
+    fn from<T: BufRead + Seek>(acquisition: &Acquisition<T>, chunk_size: u32) -> Self {
+        AcquisitionDetails {
+            width: acquisition.width() as u32,
+            height: acquisition.height() as u32,
+            num_spectra: acquisition.num_spectra() as u32,
+            chunk_size,
+            chunks: Vec::new(),
+        }
+    }
 
-    mode: Mode,
+    fn acquired_width(&self) -> u32 {
+        if self.width <= self.num_spectra {
+            self.width
+        } else {
+            self.num_spectra
+        }
+    }
+
+    fn acquired_height(&self) -> u32 {
+        (self.num_spectra / self.width) + 1
+    }
+
+    fn num_chunks_x(&self) -> u32 {
+        (self.acquired_width() / self.chunk_size) + 1
+    }
+
+    fn num_chunks_y(&self) -> u32 {
+        (self.acquired_height() / self.chunk_size) + 1
+    }
 }
 
-impl TemporaryFile {
+#[derive(Debug)]
+struct ChannelChunk {
+    num_intensities: u64,
+    offset: u64,
+    length: u64,
+}
+
+#[derive(Debug)]
+struct PixelChunk {
+    channels: Vec<ChannelChunk>,
+}
+
+impl PixelChunk {
     fn new() -> Self {
-        let mut rng = rand::thread_rng();
-        let value: u64 = rng.gen();
-
-        let filename = format!("{}.tmp", value);
-        std::fs::File::create(&filename).unwrap();
-
-        TemporaryFile {
-            name: filename,
-
-            mode: Mode::None,
-        }
-    }
-
-    fn read_mode(&mut self) -> std::io::Result<()> {
-        if let Mode::Writing(writer) = &mut self.mode {
-            writer.flush()?;
-        }
-
-        self.mode = Mode::Reading(BufReader::new(File::open(&self.name)?));
-
-        Ok(())
-    }
-
-    fn write_mode(&mut self) -> std::io::Result<()> {
-        self.mode = Mode::Writing(BufWriter::new(
-            std::fs::OpenOptions::new().write(true).open(&self.name)?,
-        ));
-
-        Ok(())
-    }
-}
-
-impl Drop for TemporaryFile {
-    fn drop(&mut self) {
-        std::fs::remove_file(&self.name).unwrap();
-    }
-}
-
-impl Seek for TemporaryFile {
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        match &mut self.mode {
-            Mode::None => {
-                if let SeekFrom::Start(pos) = pos {
-                    if pos == 0 {
-                        return Ok(0);
-                    }
-                }
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "Can't seek unless we decide to read or write",
-                ))
-            }
-            Mode::Reading(reader) => reader.seek(pos),
-            Mode::Writing(writer) => writer.seek(pos),
+        PixelChunk {
+            channels: Vec::new(),
         }
     }
 }
 
-impl Read for TemporaryFile {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self.mode {
-            Mode::None | Mode::Writing(_) => {
-                self.read_mode()?;
-            }
-            _ => {}
-        }
-
-        match &mut self.mode {
-            Mode::Reading(reader) => reader.read(buf),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Can't read unless in read mode",
-            )),
-        }
-    }
-}
-
-impl Write for TemporaryFile {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self.mode {
-            Mode::None | Mode::Reading(_) => {
-                self.write_mode()?;
-            }
-            _ => {}
-        }
-
-        match &mut self.mode {
-            Mode::Writing(writer) => writer.write(buf),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Can't write unless in write mode",
-            )),
-        }
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        match self.mode {
-            Mode::None | Mode::Reading(_) => {
-                self.write_mode()?;
-            }
-            _ => {}
-        }
-
-        match &mut self.mode {
-            Mode::Writing(writer) => writer.write_all(buf),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Can't write unless in write mode",
-            )),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match &mut self.mode {
-            Mode::Writing(writer) => writer.flush(),
-            _ => Ok(()),
-        }
-    }
-}
-
-pub fn convert<T: BufRead + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
-    let mut acquisition_offsets = HashMap::new();
+pub fn convert<T: BufRead + Seek>(mcd: &MCD<T>) -> Result<(), MCDError> {
+    //let mut acquisition_offsets = HashMap::new();
     //println!("Opening {:?} for writing", mcd.dcm_file());
-    let dcm_file = std::fs::File::create(mcd.dcm_file()).unwrap();
+    let dcm_file = std::fs::File::create(mcd.dcm_file())?;
     let mut dcm_file = BufWriter::new(dcm_file);
 
     let mut num_acquisitions = 0;
@@ -168,113 +102,225 @@ pub fn convert<T: BufRead + Seek>(mcd: &MCD<T>) -> std::io::Result<()> {
 
     //println!("Writing {} acquisitions.", num_acquisitions);
 
-    dcm_file.write_u8(num_acquisitions as u8)?;
-    let index_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
-    dcm_file.write_all(&vec![0; num_acquisitions * 11])?;
+    let chunk_size = 128;
 
-    let mut acquisition_index: Vec<(u16, u64, u8)> = Vec::new();
+    //dcm_file.write_u8(chunk_size as u8)?;
+
+    dcm_file.write_u8(num_acquisitions as u8)?;
+    let index_location = dcm_file.seek(SeekFrom::Current(0))?;
+    dcm_file.write_all(&vec![0; num_acquisitions * 10])?;
+
+    let mut acquisition_index: Vec<(u16, u64)> = Vec::new();
 
     for slide in mcd.slides() {
         for panorama in slide.panoramas() {
             for acquisition in panorama.acquisitions() {
-                let mut files = Vec::with_capacity(acquisition.channels().len());
+                let mut acq_details = AcquisitionDetails::from(acquisition, chunk_size);
 
-                for _channel in 0..acquisition.channels().len() {
-                    files.push(TemporaryFile::new());
-                }
+                println!(
+                    "[{}] Total # chunks: ({}, {})",
+                    acquisition.description(),
+                    acq_details.num_chunks_x(),
+                    acq_details.num_chunks_y()
+                );
 
-                for spectrum in acquisition.spectra() {
-                    for (channel_index, &value) in spectrum.iter().enumerate() {
-                        files[channel_index].write_all(&value.to_le_bytes())?;
+                for y_chunk in 0..acq_details.num_chunks_y() {
+                    for x_chunk in 0..acq_details.num_chunks_x() {
+                        let x_start = x_chunk * chunk_size;
+                        let x_stop = (x_start + chunk_size).min(acq_details.acquired_width());
+
+                        let y_start = y_chunk * chunk_size;
+                        let y_stop = (y_start + chunk_size).min(acq_details.acquired_height());
+
+                        let chunk_width = x_stop - x_start;
+                        let chunk_height = y_stop - y_start;
+
+                        //println!("[{}] ({}, {})", acquisition.description(), x_chunk, y_chunk);
+
+                        let mut channel_chunks = Vec::with_capacity(acquisition.channels().len());
+
+                        for _ in 0..acquisition.channels().len() {
+                            channel_chunks.push(Vec::with_capacity(
+                                chunk_width as usize * chunk_height as usize,
+                            ));
+                        }
+
+                        for y in y_start..y_stop {
+                            for x in x_start..x_stop {
+                                let spectrum = match acquisition.spectrum(x as usize, y as usize) {
+                                    Ok(spectrum) => spectrum,
+                                    Err(MCDError::InvalidIndex {
+                                        index: _,
+                                        num_spectra: _,
+                                    }) => {
+                                        break;
+                                    }
+                                    Err(error) => {
+                                        return Err(error);
+                                    }
+                                };
+
+                                for (index, intensity) in spectrum.iter().enumerate() {
+                                    channel_chunks[index].push(*intensity);
+                                }
+                            }
+                        }
+
+                        let mut pixel_chunk = PixelChunk::new();
+
+                        for channel_chunk in channel_chunks {
+                            let num_intensities = channel_chunk.len();
+
+                            let mut buf: Vec<u8> = Vec::with_capacity(channel_chunk.len() * 4);
+
+                            for intensity in channel_chunk {
+                                buf.write_f32::<LittleEndian>(intensity)?;
+                            }
+
+                            let compressed = lz4_flex::compress(&buf);
+
+                            let cur_location = dcm_file.seek(SeekFrom::Current(0))?;
+                            dcm_file.write_all(&compressed)?;
+                            let new_location = dcm_file.seek(SeekFrom::Current(0))?;
+
+                            pixel_chunk.channels.push(ChannelChunk {
+                                num_intensities: num_intensities as u64,
+                                offset: cur_location,
+                                length: new_location - cur_location,
+                            });
+                        }
+
+                        acq_details.chunks.push(pixel_chunk);
                     }
                 }
 
-                // Make sure all data is flushed to the temporary files
-                for file in files.iter_mut() {
-                    file.flush().unwrap();
-                }
-
                 let acquisition_index_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
-                acquisition_index.push((
-                    acquisition.id(),
-                    acquisition_index_location,
-                    acquisition.channels().len() as u8,
-                ));
+                acquisition_index.push((acquisition.id(), acquisition_index_location));
 
-                // Write out empty data which we will overwrite with the indicies and sizes later
-                dcm_file.write_all(&vec![0; acquisition.channels().len() * 16])?;
-
-                let mut buf = vec![0; acquisition.num_spectra() * 4];
-                let mut offsets = Vec::new();
-                let mut sizes = Vec::new();
-
-                for file in files.iter_mut() {
-                    file.seek(SeekFrom::Start(0)).unwrap();
-                    file.read_exact(&mut buf).unwrap();
-
-                    let compressed = lz4_flex::compress(&buf);
-
-                    let cur_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
-                    dcm_file.write_all(&compressed).unwrap();
-                    let new_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
-
-                    offsets.push(cur_location);
-                    sizes.push(new_location - cur_location);
-                }
-
-                let acquisition_end_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
-                // Go back to where we wanted to write the index
-                dcm_file
-                    .seek(SeekFrom::Start(acquisition_index_location))
-                    .unwrap();
-                for (&offset, &size) in offsets.iter().zip(sizes.iter()) {
-                    dcm_file.write_u64::<LittleEndian>(offset).unwrap();
-                    dcm_file.write_u64::<LittleEndian>(size).unwrap();
-                }
-
-                // Reset the location to the end of the acquisition to continue writing
-                dcm_file
-                    .seek(SeekFrom::Start(acquisition_end_location))
-                    .unwrap();
-
-                acquisition_offsets.insert(
-                    acquisition.id(),
-                    AcquisitionOffset {
-                        id: acquisition.id(),
-                        offsets,
-                        sizes,
-                    },
-                );
-
-                //println!("{:?}", acquisition_offsets);
-                //println!("{:?} done", acquisition.description());
+                dcm_file.write_acquisition_details(&acq_details)?;
             }
         }
     }
 
-    // Go to location to write the index now we know where the data is stored
-    dcm_file.seek(SeekFrom::Start(index_location)).unwrap();
+    dcm_file.flush()?;
 
-    for &(acquisition_id, offset, num_channels) in &acquisition_index {
-        dcm_file.write_u16::<LittleEndian>(acquisition_id).unwrap();
-        dcm_file.write_u64::<LittleEndian>(offset).unwrap();
-        dcm_file.write_u8(num_channels).unwrap();
+    // Go to location to write the index now we know where the data is stored
+    dcm_file.seek(SeekFrom::Start(index_location))?;
+
+    for &(acquisition_id, offset) in &acquisition_index {
+        dcm_file.write_u16::<LittleEndian>(acquisition_id)?;
+        dcm_file.write_u64::<LittleEndian>(offset)?;
 
         //  println!("Written: {}, {}", acquisition_id, offset);
     }
 
-    dcm_file.flush().unwrap();
+    dcm_file.flush()?;
 
     Ok(())
 }
 
-pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
+trait ReadDCM {
+    fn read_acquisition_details(&mut self) -> std::io::Result<AcquisitionDetails>;
+    fn read_pixel_chunk(&mut self) -> std::io::Result<PixelChunk>;
+    fn read_channel_chunk(&mut self) -> std::io::Result<ChannelChunk>;
+}
+
+trait WriteDCM {
+    fn write_acquisition_details(&mut self, details: &AcquisitionDetails) -> std::io::Result<()>;
+    fn write_pixel_chunk(&mut self, chunk: &PixelChunk) -> std::io::Result<()>;
+    fn write_channel_chunk(&mut self, chunk: &ChannelChunk) -> std::io::Result<()>;
+}
+
+impl<T: ReadBytesExt> ReadDCM for T {
+    fn read_acquisition_details(&mut self) -> std::io::Result<AcquisitionDetails> {
+        let width = self.read_u32::<LittleEndian>()?;
+        let height = self.read_u32::<LittleEndian>()?;
+        let num_spectra = self.read_u32::<LittleEndian>()?;
+        let chunk_size = self.read_u32::<LittleEndian>()?;
+        let num_chunks = self.read_u64::<LittleEndian>()?;
+
+        let mut chunks = Vec::with_capacity(num_chunks as usize);
+
+        for _ in 0..num_chunks {
+            chunks.push(self.read_pixel_chunk()?);
+        }
+
+        Ok(AcquisitionDetails {
+            width,
+            height,
+            num_spectra,
+            chunk_size,
+            chunks,
+        })
+    }
+
+    fn read_pixel_chunk(&mut self) -> std::io::Result<PixelChunk> {
+        let num_channels = self.read_u64::<LittleEndian>()?;
+
+        let mut channels = Vec::with_capacity(num_channels as usize);
+
+        for _ in 0..num_channels {
+            channels.push(self.read_channel_chunk()?);
+        }
+
+        Ok(PixelChunk { channels })
+    }
+
+    fn read_channel_chunk(&mut self) -> std::io::Result<ChannelChunk> {
+        let num_intensities = self.read_u64::<LittleEndian>()?;
+        let offset = self.read_u64::<LittleEndian>()?;
+        let length = self.read_u64::<LittleEndian>()?;
+
+        Ok(ChannelChunk {
+            num_intensities,
+            offset,
+            length,
+        })
+    }
+}
+
+impl<T: WriteBytesExt> WriteDCM for T {
+    fn write_acquisition_details(&mut self, details: &AcquisitionDetails) -> std::io::Result<()> {
+        self.write_u32::<LittleEndian>(details.width)?;
+        self.write_u32::<LittleEndian>(details.height)?;
+        self.write_u32::<LittleEndian>(details.num_spectra)?;
+        self.write_u32::<LittleEndian>(details.chunk_size)?;
+        self.write_u64::<LittleEndian>(details.chunks.len() as u64)?;
+
+        for chunk in &details.chunks {
+            self.write_pixel_chunk(chunk)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_pixel_chunk(&mut self, chunk: &PixelChunk) -> std::io::Result<()> {
+        self.write_u64::<LittleEndian>(chunk.channels.len() as u64)?;
+
+        for channel in &chunk.channels {
+            self.write_channel_chunk(channel);
+        }
+
+        Ok(())
+    }
+
+    fn write_channel_chunk(&mut self, chunk: &ChannelChunk) -> std::io::Result<()> {
+        self.write_u64::<LittleEndian>(chunk.num_intensities)?;
+        self.write_u64::<LittleEndian>(chunk.offset)?;
+        self.write_u64::<LittleEndian>(chunk.length)?;
+
+        Ok(())
+    }
+}
+
+pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> Result<(), MCDError> {
     //println!("Opening {:?} for reading", mcd.dcm_file());
-    let dcm_file = std::fs::File::open(mcd.dcm_file()).unwrap();
+    let dcm_file = std::fs::File::open(mcd.dcm_file())?;
     let dcm_file_arc = Arc::new(Mutex::new(BufReader::new(dcm_file)));
     let mut dcm_file = dcm_file_arc.lock().unwrap();
 
     let num_acquisitions = dcm_file.read_u8()?;
+
     let mut acquisition_offsets = HashMap::with_capacity(num_acquisitions as usize);
 
     for _i in 0..num_acquisitions {
@@ -282,35 +328,37 @@ pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
         let offset = dcm_file
             .read_u64::<LittleEndian>()
             .expect("read offset failed");
-        let num_channels = dcm_file.read_u8().unwrap();
+        //let num_channels = dcm_file.read_u8().unwrap();
 
-        acquisition_offsets.insert(id, (offset, num_channels));
+        acquisition_offsets.insert(id, offset);
     }
 
-    //println!("Offset keys: {:?}", acquisition_offsets.keys());
+    println!("Offsets: {:?}", acquisition_offsets);
 
     for slide in mcd.slides_mut().values_mut() {
         for panorama in slide.panoramas_mut().values_mut() {
             for acquisition in panorama.acquisitions_mut().values_mut() {
                 let offset = acquisition_offsets.get(&acquisition.id());
 
-                if let Some(&(offset, num_channels)) = offset {
-                    dcm_file.seek(SeekFrom::Start(offset)).unwrap();
-                    let mut offsets = vec![0; num_channels as usize];
-                    let mut sizes = vec![0; num_channels as usize];
+                if let Some(&offset) = offset {
+                    dcm_file.seek(SeekFrom::Start(offset))?;
 
-                    for (offset, size) in offsets.iter_mut().zip(sizes.iter_mut()) {
-                        *offset = dcm_file.read_u64::<LittleEndian>().unwrap();
-                        *size = dcm_file.read_u64::<LittleEndian>().unwrap();
-                    }
+                    let acquisition_details = dcm_file.read_acquisition_details()?;
 
-                    //println!("Offsets: {:?}", offsets);
-                    //println!("Size: {:?}", sizes);
+                    // let mut offsets = vec![0; num_channels as usize];
+                    // let mut sizes = vec![0; num_channels as usize];
 
-                    acquisition.dcm_location = Some(DataLocation {
+                    // for (offset, size) in offsets.iter_mut().zip(sizes.iter_mut()) {
+                    //     *offset = dcm_file.read_u64::<LittleEndian>().unwrap();
+                    //     *size = dcm_file.read_u64::<LittleEndian>().unwrap();
+                    // }
+
+                    // //println!("Offsets: {:?}", offsets);
+                    // //println!("Size: {:?}", sizes);
+
+                    acquisition.dcm_location = Some(DCMLocation {
                         reader: dcm_file_arc.clone(),
-                        offsets,
-                        sizes,
+                        details: acquisition_details,
                     });
 
                     /*println!(
@@ -324,4 +372,82 @@ pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct DCMLocation {
+    reader: Arc<Mutex<BufReader<File>>>,
+    details: AcquisitionDetails,
+}
+
+impl DCMLocation {
+    pub fn read_channel(&self, channel: usize, region: &Region) -> Result<Vec<f32>, MCDError> {
+        let mut data = vec![0.0; region.width as usize * region.height as usize];
+
+        let mut reader = self.reader.lock().unwrap();
+
+        let start_chunk_x = region.x / self.details.chunk_size;
+        let end_chunk_x = ((region.x + region.width) / self.details.chunk_size + 1)
+            .min(self.details.num_chunks_x());
+
+        let start_chunk_y = region.y / self.details.chunk_size;
+        let end_chunk_y = ((region.y + region.height) / self.details.chunk_size + 1)
+            .min(self.details.num_chunks_y());
+
+        let region_end_x = region.x + region.width;
+        let region_end_y = region.y + region.height;
+
+        for chunk_y in start_chunk_y..end_chunk_y {
+            for chunk_x in start_chunk_x..end_chunk_x {
+                let chunk_index = (chunk_y * self.details.num_chunks_x()) + chunk_x;
+
+                let pixel_chunk = &self.details.chunks[chunk_index as usize];
+                let channel_chunk = &pixel_chunk.channels[channel];
+
+                let mut buf = vec![0; channel_chunk.length as usize];
+
+                reader.seek(SeekFrom::Start(channel_chunk.offset))?;
+                reader.read_exact(&mut buf)?;
+
+                let decompressed_data =
+                    lz4_flex::decompress(&buf, channel_chunk.num_intensities as usize * 4)?;
+
+                let mut decompressed_data = Cursor::new(decompressed_data);
+
+                let start_x = chunk_x * self.details.chunk_size;
+                let end_x = (start_x + self.details.chunk_size).min(self.details.acquired_width());
+
+                let start_y = chunk_y * self.details.chunk_size;
+                let end_y = (start_y + self.details.chunk_size).min(self.details.acquired_height());
+
+                for y in start_y..end_y {
+                    for x in start_x..end_x {
+                        // sometimes the run is stopped early, so make sure to check that we are loading in the desired data
+                        if (y * self.details.acquired_width()) + x >= self.details.num_spectra {
+                            break;
+                        }
+
+                        let intensity = decompressed_data.read_f32::<LittleEndian>()?;
+
+                        if x >= region.x && y >= region.y && x < region_end_x && y < region_end_y {
+                            let index = ((y - region.y) * region.width) + (x - region.x);
+
+                            data[index as usize] = intensity;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(data)
+    }
+
+    pub fn read_channels(&self, channels: Vec<usize>, region: Region) -> Vec<Vec<f32>> {
+        let mut data =
+            vec![vec![0.0; region.width as usize * region.height as usize]; channels.len()];
+
+        let mut reader = self.reader.lock().unwrap();
+
+        data
+    }
 }

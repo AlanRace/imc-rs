@@ -3,11 +3,13 @@
 
 //! python bindings for imc-rs, a library for accessing imaging mass cytometry data.
 
+use imc_rs::error::MCDError;
 use imc_rs::ChannelIdentifier;
 use imc_rs::MCD;
 use numpy::ndarray::Array;
 use numpy::PyArray2;
 use pyo3::exceptions;
+use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
 
 // For passing back images/data
@@ -21,6 +23,20 @@ use std::sync::Arc;
 #[pyclass]
 struct Mcd {
     mcd: Arc<imc_rs::MCD<BufReader<File>>>,
+}
+
+struct PyMcdError(MCDError);
+
+impl From<MCDError> for PyMcdError {
+    fn from(error: MCDError) -> Self {
+        PyMcdError(error)
+    }
+}
+
+impl From<PyMcdError> for PyErr {
+    fn from(error: PyMcdError) -> Self {
+        PyIOError::new_err(error.0.to_string())
+    }
 }
 
 #[pymethods]
@@ -47,7 +63,10 @@ impl Mcd {
             Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
         };
 
-        let mcd = imc_rs::MCD::parse_with_dcm(BufReader::new(file), filename)?;
+        let mcd = match imc_rs::MCD::parse_with_dcm(BufReader::new(file), filename) {
+            Ok(mcd) => mcd,
+            Err(error) => return Err(PyMcdError::from(error).into()),
+        };
 
         Ok(Mcd { mcd: Arc::new(mcd) })
     }
@@ -434,7 +453,7 @@ impl Acquisition {
         let acquisition = self.get_acquisition();
 
         let identifier = ChannelIdentifier::Name(channel.name.clone());
-        let channel_data = match acquisition.channel_data(&identifier) {
+        let channel_data = match acquisition.channel_data(&identifier, None) {
             Ok(channel_data) => channel_data,
             Err(error) => {
                 return Err(exceptions::PyIOError::new_err(error.to_string()));

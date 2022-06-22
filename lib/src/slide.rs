@@ -309,7 +309,7 @@ impl<T: Seek + BufRead> Slide<T> {
 
                     //let bounding_box = acquisition.slide_bounding_box();
                     let transform = acquisition.to_slide_transform();
-                    let data = acquisition.channel_data(identifier)?;
+                    let data = acquisition.channel_data(identifier, None)?;
 
                     let max_value = match max_value {
                         Some(value) => value,
@@ -319,14 +319,14 @@ impl<T: Seek + BufRead> Slide<T> {
                     let mut index = 0;
 
                     let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
-                        ImageBuffer::new(data.width as u32, data.height as u32);
+                        ImageBuffer::new(data.width(), data.height());
 
-                    for y in 0..data.height {
+                    for y in 0..data.height() {
                         if index >= data.valid_pixels {
                             break;
                         }
 
-                        for x in 0..data.width {
+                        for x in 0..data.width() {
                             if index >= data.valid_pixels {
                                 break;
                             }
