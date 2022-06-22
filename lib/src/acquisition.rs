@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
-    fs::File,
-    io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom},
+    io::{BufRead, Cursor, Seek, SeekFrom},
     sync::{Arc, Mutex, MutexGuard},
 };
 
@@ -306,14 +305,35 @@ impl<T: BufRead + Seek> Acquisition<T> {
 
     /// Returns the ChannelImage for the channel matching the `ChannelIdentifier`. This contains the intensities of the channel
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
-    pub fn channel_data(
+    pub fn channel_image(
         &self,
-        identifier: &ChannelIdentifier,
+        identifiers: &ChannelIdentifier,
         region: Option<Region>,
     ) -> Result<ChannelImage, MCDError> {
-        let channel = self.channel(identifier).ok_or(MCDError::NoSuchChannel {
+        self.channel_images(&[identifiers], region)
+            .map(|mut data| data.drain(..).last().unwrap())
+    }
+
+    /// Returns array of ChannelImages for the channels matching the `ChannelIdentifier`s. This contains the intensities of the channel
+    /// for each detected pixel, the number of valid pixels and the width and height of the image.
+    pub fn channel_images(
+        &self,
+        identifiers: &[&ChannelIdentifier],
+        region: Option<Region>,
+    ) -> Result<Vec<ChannelImage>, MCDError> {
+        let channels: Option<Vec<_>> = identifiers
+            .iter()
+            .map(|identifier| self.channel(identifier))
+            .collect();
+
+        let channels = channels.ok_or(MCDError::NoSuchChannel {
             acquisition: AcquisitionIdentifier::Id(self.id),
         })?;
+
+        let order_numbers: Vec<_> = channels
+            .iter()
+            .map(|channel| channel.order_number() as usize)
+            .collect();
 
         let region = match region {
             Some(region) => region,
@@ -332,61 +352,85 @@ impl<T: BufRead + Seek> Acquisition<T> {
         let valid_region_col = (region.x + region.width).min(last_col as u32);
 
         let valid_pixels =
-            ((valid_region_row - region.y) * region.width) + (valid_region_col - region.x);
+            ((valid_region_row - region.y - 1) * region.width) + (valid_region_col - region.x);
 
-        println!(
-            "Valid pixels: {} | {} {}",
-            valid_pixels, valid_region_row, valid_region_col
-        );
+        // println!(
+        //     "Valid pixels: {} | {} {} | {} {} | {}",
+        //     valid_pixels,
+        //     valid_region_col,
+        //     valid_region_row,
+        //     self.width(),
+        //     self.height(),
+        //     self.num_spectra()
+        // );
 
-        let mut data = vec![0.0; valid_pixels as usize];
-        let mut min_value = f32::MAX;
-        let mut max_value = f32::MIN;
+        // let mut data = vec![0.0; valid_pixels as usize];
+        // let mut min_value = f32::MAX;
+        // let mut max_value = f32::MIN;
 
         //println!("DCM Location: {:?}", self.dcm_location);
 
         if let Some(data_location) = &self.dcm_location {
-            data = data_location.read_channel(channel.order_number() as usize, &region)?;
+            let mut data = data_location.read_channels(&order_numbers, &region)?;
 
-            for &data_point in data.iter() {
-                if data_point < min_value {
-                    min_value = data_point;
-                }
-                if data_point > max_value {
-                    max_value = data_point;
-                }
-            }
+            let images: Vec<_> = data
+                .drain(..)
+                .zip(channels.iter())
+                .map(|(data, channel)| {
+                    let mut min_value = f32::MAX;
+                    let mut max_value = f32::MIN;
+
+                    for &data_point in data.iter() {
+                        if data_point < min_value {
+                            min_value = data_point;
+                        }
+                        if data_point > max_value {
+                            max_value = data_point;
+                        }
+                    }
+
+                    ChannelImage {
+                        region,
+                        range: (min_value, max_value),
+                        valid_pixels: valid_pixels as usize,
+                        data,
+                    }
+                })
+                .collect();
+
+            Ok(images)
         } else {
-            let offset = self.data_start_offset as u64
-                + channel.order_number() as u64 * self.value_bytes as u64;
+            todo!();
+            // let offset = self.data_start_offset as u64
+            //     + channel.order_number() as u64 * self.value_bytes as u64;
 
-            let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
-            // TODO: Currently this only works for f32
-            let mut buf = [0; 4];
+            // let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
+            // // TODO: Currently this only works for f32
+            // let mut buf = [0; 4];
 
-            reader.seek(SeekFrom::Start(offset))?;
-            for data_point in data.iter_mut() {
-                reader.read_exact(&mut buf)?;
+            // reader.seek(SeekFrom::Start(offset))?;
+            // for data_point in data.iter_mut() {
+            //     reader.read_exact(&mut buf)?;
 
-                *data_point = f32::from_le_bytes(buf);
+            //     *data_point = f32::from_le_bytes(buf);
 
-                if *data_point < min_value {
-                    min_value = *data_point;
-                }
-                if *data_point > max_value {
-                    max_value = *data_point;
-                }
+            //     if *data_point < min_value {
+            //         min_value = *data_point;
+            //     }
+            //     if *data_point > max_value {
+            //         max_value = *data_point;
+            //     }
 
-                reader.seek(SeekFrom::Current(self.spectrum_size() as i64 - 4))?;
-            }
+            //     reader.seek(SeekFrom::Current(self.spectrum_size() as i64 - 4))?;
+            // }
         }
 
-        Ok(ChannelImage {
-            region,
-            range: (min_value, max_value),
-            valid_pixels: valid_pixels as usize,
-            data,
-        })
+        // Ok(ChannelImage {
+        //     region,
+        //     range: (min_value, max_value),
+        //     valid_pixels: valid_pixels as usize,
+        //     data,
+        // })
     }
 
     /// Returns the channel which matches the given identifier, or None if no match found

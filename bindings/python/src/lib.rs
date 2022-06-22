@@ -453,7 +453,7 @@ impl Acquisition {
         let acquisition = self.get_acquisition();
 
         let identifier = ChannelIdentifier::Name(channel.name.clone());
-        let channel_data = match acquisition.channel_data(&identifier, None) {
+        let channel_data = match acquisition.channel_image(&identifier, None) {
             Ok(channel_data) => channel_data,
             Err(error) => {
                 return Err(exceptions::PyIOError::new_err(error.to_string()));

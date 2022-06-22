@@ -298,7 +298,7 @@ impl<T: WriteBytesExt> WriteDCM for T {
         self.write_u64::<LittleEndian>(chunk.channels.len() as u64)?;
 
         for channel in &chunk.channels {
-            self.write_channel_chunk(channel);
+            self.write_channel_chunk(channel)?;
         }
 
         Ok(())
@@ -333,7 +333,7 @@ pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> Result<(), MCDError> {
         acquisition_offsets.insert(id, offset);
     }
 
-    println!("Offsets: {:?}", acquisition_offsets);
+    // println!("Offsets: {:?}", acquisition_offsets);
 
     for slide in mcd.slides_mut().values_mut() {
         for panorama in slide.panoramas_mut().values_mut() {
@@ -345,27 +345,10 @@ pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> Result<(), MCDError> {
 
                     let acquisition_details = dcm_file.read_acquisition_details()?;
 
-                    // let mut offsets = vec![0; num_channels as usize];
-                    // let mut sizes = vec![0; num_channels as usize];
-
-                    // for (offset, size) in offsets.iter_mut().zip(sizes.iter_mut()) {
-                    //     *offset = dcm_file.read_u64::<LittleEndian>().unwrap();
-                    //     *size = dcm_file.read_u64::<LittleEndian>().unwrap();
-                    // }
-
-                    // //println!("Offsets: {:?}", offsets);
-                    // //println!("Size: {:?}", sizes);
-
                     acquisition.dcm_location = Some(DCMLocation {
                         reader: dcm_file_arc.clone(),
                         details: acquisition_details,
                     });
-
-                    /*println!(
-                        "[{}] DCM Location: {:?}",
-                        acquisition.description(),
-                        acquisition.dcm_location
-                    );*/
                 }
             }
         }
@@ -382,7 +365,17 @@ pub struct DCMLocation {
 
 impl DCMLocation {
     pub fn read_channel(&self, channel: usize, region: &Region) -> Result<Vec<f32>, MCDError> {
-        let mut data = vec![0.0; region.width as usize * region.height as usize];
+        self.read_channels(&[channel], region)
+            .map(|mut data| data.drain(..).last().unwrap())
+    }
+
+    pub fn read_channels(
+        &self,
+        channels: &[usize],
+        region: &Region,
+    ) -> Result<Vec<Vec<f32>>, MCDError> {
+        let mut data =
+            vec![vec![0.0; region.width as usize * region.height as usize]; channels.len()];
 
         let mut reader = self.reader.lock().unwrap();
 
@@ -399,37 +392,65 @@ impl DCMLocation {
 
         for chunk_y in start_chunk_y..end_chunk_y {
             for chunk_x in start_chunk_x..end_chunk_x {
-                let chunk_index = (chunk_y * self.details.num_chunks_x()) + chunk_x;
-
-                let pixel_chunk = &self.details.chunks[chunk_index as usize];
-                let channel_chunk = &pixel_chunk.channels[channel];
-
-                let mut buf = vec![0; channel_chunk.length as usize];
-
-                reader.seek(SeekFrom::Start(channel_chunk.offset))?;
-                reader.read_exact(&mut buf)?;
-
-                let decompressed_data =
-                    lz4_flex::decompress(&buf, channel_chunk.num_intensities as usize * 4)?;
-
-                let mut decompressed_data = Cursor::new(decompressed_data);
-
                 let start_x = chunk_x * self.details.chunk_size;
                 let end_x = (start_x + self.details.chunk_size).min(self.details.acquired_width());
 
                 let start_y = chunk_y * self.details.chunk_size;
                 let end_y = (start_y + self.details.chunk_size).min(self.details.acquired_height());
 
-                for y in start_y..end_y {
-                    for x in start_x..end_x {
-                        // sometimes the run is stopped early, so make sure to check that we are loading in the desired data
-                        if (y * self.details.acquired_width()) + x >= self.details.num_spectra {
+                let chunk_index = (chunk_y * self.details.num_chunks_x()) + chunk_x;
+
+                let pixel_chunk = &self.details.chunks[chunk_index as usize];
+
+                for (data, &channel) in data.iter_mut().zip(channels.iter()) {
+                    let channel_chunk = &pixel_chunk.channels[channel];
+
+                    let mut buf = vec![0; channel_chunk.length as usize];
+
+                    reader.seek(SeekFrom::Start(channel_chunk.offset))?;
+                    reader.read_exact(&mut buf)?;
+
+                    let decompressed_data =
+                        lz4_flex::decompress(&buf, channel_chunk.num_intensities as usize * 4)?;
+
+                    let mut decompressed_data = Cursor::new(decompressed_data);
+
+                    for y in start_y..end_y {
+                        if region.y > y {
+                            decompressed_data
+                                .seek(SeekFrom::Current(self.details.chunk_size as i64 * 4))?;
+
+                            continue;
+                        }
+
+                        if y >= region_end_y {
                             break;
                         }
 
-                        let intensity = decompressed_data.read_f32::<LittleEndian>()?;
+                        let start_x = if region.x > start_x {
+                            decompressed_data
+                                .seek(SeekFrom::Current((region.x as i64 - start_x as i64) * 4))?;
 
-                        if x >= region.x && y >= region.y && x < region_end_x && y < region_end_y {
+                            region.x
+                        } else {
+                            start_x
+                        };
+
+                        for x in start_x..end_x {
+                            // If we have gone past the end of the tile, then we can move on to the next line
+                            if x >= region_end_x {
+                                decompressed_data
+                                    .seek(SeekFrom::Current((end_x as i64 - x as i64) * 4))?;
+
+                                break;
+                            }
+
+                            // sometimes the run is stopped early, so make sure to check that we are loading in the desired data
+                            if (y * self.details.acquired_width()) + x >= self.details.num_spectra {
+                                break;
+                            }
+
+                            let intensity = decompressed_data.read_f32::<LittleEndian>()?;
                             let index = ((y - region.y) * region.width) + (x - region.x);
 
                             data[index as usize] = intensity;
@@ -440,14 +461,5 @@ impl DCMLocation {
         }
 
         Ok(data)
-    }
-
-    pub fn read_channels(&self, channels: Vec<usize>, region: Region) -> Vec<Vec<f32>> {
-        let mut data =
-            vec![vec![0.0; region.width as usize * region.height as usize]; channels.len()];
-
-        let mut reader = self.reader.lock().unwrap();
-
-        data
     }
 }

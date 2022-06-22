@@ -309,7 +309,7 @@ impl<T: Seek + BufRead> Slide<T> {
 
                     //let bounding_box = acquisition.slide_bounding_box();
                     let transform = acquisition.to_slide_transform();
-                    let data = acquisition.channel_data(identifier, None)?;
+                    let data = acquisition.channel_image(identifier, None)?;
 
                     let max_value = match max_value {
                         Some(value) => value,

@@ -153,6 +153,7 @@ pub trait OnSlide {
     fn to_slide_transform(&self) -> AffineTransform<f64>;
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Region {
     pub x: u32,
     pub y: u32,
@@ -677,7 +678,7 @@ mod tests {
                 .unwrap();
 
             let x_channel = acquisition
-                .channel_data(&ChannelIdentifier::Name("X".to_string()), None)
+                .channel_image(&ChannelIdentifier::Name("X".to_string()), None)
                 .unwrap();
 
             println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
@@ -693,15 +694,18 @@ mod tests {
 
             let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
             println!("Subimage");
-            let data = acquisition.channel_data(
-                &channel_identifier,
-                None, // Some(Region {
-                      //     x: 1000,
-                      //     y: 1000,
-                      //     width: 500,
-                      //     height: 500,
-                      // }),
+            let data = acquisition.channel_images(
+                &[&channel_identifier],
+                // None,
+                Some(Region {
+                    x: 1000,
+                    y: 1000,
+                    width: 500,
+                    height: 500,
+                }),
             )?;
+
+            let data = &data[0];
 
             let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
                 ImageBuffer::new(data.width(), data.height());
@@ -735,7 +739,16 @@ mod tests {
             let mut image_map = HashMap::new();
 
             for acquisition in mcd.acquisitions() {
-                match acquisition.channel_data(&channel_identifier, None) {
+                match acquisition.channel_image(
+                    &channel_identifier,
+                    // None
+                    Some(Region {
+                        x: 1000,
+                        y: 1000,
+                        width: 500,
+                        height: 500,
+                    }),
+                ) {
                     Ok(data) => {
                         image_map.insert(format!("{}", acquisition.id()), ChannelImage(data));
                     }
