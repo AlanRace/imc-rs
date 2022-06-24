@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    collections::HashMap,
     io::{BufRead, Cursor, Seek, SeekFrom},
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -56,6 +57,33 @@ impl fmt::Display for AcquisitionIdentifier {
 #[derive(Debug)]
 pub enum ProfilingType {
     Global,
+}
+
+pub trait Acquisitions {
+    fn channels(&self) -> Vec<&AcquisitionChannel>;
+}
+
+impl<T: BufRead + Seek> Acquisitions for Vec<&Acquisition<T>> {
+    fn channels(&self) -> Vec<&AcquisitionChannel> {
+        let mut channels = HashMap::new();
+
+        for acquisition in self {
+            for channel in acquisition.channels() {
+                if !channels.contains_key(channel.name()) {
+                    channels.insert(channel.name(), channel);
+                }
+            }
+        }
+
+        let mut ordered_channels = Vec::new();
+        for (_, channel) in channels.drain() {
+            ordered_channels.push(channel);
+        }
+
+        ordered_channels.sort_by_key(|a| a.label().to_ascii_lowercase());
+
+        ordered_channels
+    }
 }
 
 /// Acquisition represents a single region analysed by IMC.
@@ -252,6 +280,20 @@ impl<T: BufRead + Seek> Acquisition<T> {
         println!("Expected: {} | Measured: {}", expected_size, measured_size);
 
         expected_size == measured_size
+    }
+
+    pub fn in_region(&self, region: &BoundingBox<f64>) -> bool {
+        let slide_box = self.slide_bounding_box();
+
+        if slide_box.min_x < region.max_x()
+            && slide_box.max_x() > region.min_x
+            && slide_box.max_y() > region.min_y
+            && slide_box.min_y < region.max_y()
+        {
+            return true;
+        }
+
+        false
     }
 
     /// Provides an iterator over all spectra (each pixel) within the acquisition

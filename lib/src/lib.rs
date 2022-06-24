@@ -37,7 +37,7 @@ mod slide;
 /// Provides methods for reading in cell segmentation data from Halo
 pub mod halo;
 
-pub use self::acquisition::{Acquisition, AcquisitionIdentifier};
+pub use self::acquisition::{Acquisition, AcquisitionIdentifier, Acquisitions};
 pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
 pub use self::slide::Slide;
@@ -48,7 +48,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::io::{BufRead, Cursor, Seek, SeekFrom};
 
-use std::ops::DerefMut;
+use std::ops::{Add, DerefMut};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -325,6 +325,22 @@ impl<T: Seek + BufRead> MCD<T> {
         None
     }
 
+    pub fn acquisitions_in(&self, region: &BoundingBox<f64>) -> Vec<&Acquisition<T>> {
+        let mut acquisitions = Vec::new();
+
+        for slide in self.slides.values() {
+            for panorama in slide.panoramas() {
+                for acquisition in panorama.acquisitions() {
+                    if acquisition.in_region(region) {
+                        acquisitions.push(acquisition);
+                    }
+                }
+            }
+        }
+
+        acquisitions
+    }
+
     /// Returns a vector of all channels present within any acquisition performed on the slide, sorted by channel order number.
     pub fn channels(&self) -> Vec<&AcquisitionChannel> {
         let mut channels = HashMap::new();
@@ -578,7 +594,7 @@ pub enum ImageFormat {
 
 /// Represents a bounding rectangle
 #[derive(Debug)]
-pub struct BoundingBox<T> {
+pub struct BoundingBox<T: num_traits::Num + Copy> {
     /// Minimum x coordinate for the bounding rectangle
     pub min_x: T,
     /// Minimum y coordinate for the bounding rectangle
@@ -587,6 +603,16 @@ pub struct BoundingBox<T> {
     pub width: T,
     /// Height of bounding rectangle
     pub height: T,
+}
+
+impl<T: num_traits::Num + Copy> BoundingBox<T> {
+    pub fn max_x(&self) -> T {
+        self.min_x + self.width
+    }
+
+    pub fn max_y(&self) -> T {
+        self.min_y + self.height
+    }
 }
 
 /// Represents a channel image (stored as a vector of f32).
