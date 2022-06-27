@@ -282,6 +282,55 @@ impl<T: BufRead + Seek> Acquisition<T> {
         expected_size == measured_size
     }
 
+    pub fn pixels_in(&self, region: &BoundingBox<f64>) -> Option<Region> {
+        let transform = self.to_slide_transform();
+
+        let top_left = transform.transform_from_slide(region.min_x, region.min_y)?;
+        let top_right = transform.transform_from_slide(region.max_x(), region.min_y)?;
+
+        let bottom_right = transform.transform_from_slide(region.max_x(), region.max_y())?;
+        let bottom_left = transform.transform_from_slide(region.min_x, region.max_y())?;
+
+        let min_x = top_left
+            .x
+            .min(top_right.x)
+            .min(bottom_right.x)
+            .min(bottom_left.x)
+            .max(0.0)
+            .floor();
+
+        let max_x = top_left
+            .x
+            .max(top_right.x)
+            .max(bottom_right.x)
+            .max(bottom_left.x)
+            .min(self.width() as f64)
+            .ceil();
+
+        let min_y = top_left
+            .y
+            .min(top_right.y)
+            .min(bottom_right.y)
+            .min(bottom_left.y)
+            .max(0.0)
+            .floor();
+
+        let max_y = top_left
+            .y
+            .max(top_right.y)
+            .max(bottom_right.y)
+            .max(bottom_left.y)
+            .min(self.height() as f64)
+            .ceil();
+
+        Some(Region {
+            x: min_x as u32,
+            y: (self.height() as u32 - max_y as u32),
+            width: (max_x - min_x) as u32,
+            height: (max_y - min_y) as u32,
+        })
+    }
+
     pub fn in_region(&self, region: &BoundingBox<f64>) -> bool {
         let slide_box = self.slide_bounding_box();
 
@@ -349,10 +398,10 @@ impl<T: BufRead + Seek> Acquisition<T> {
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
     pub fn channel_image(
         &self,
-        identifiers: &ChannelIdentifier,
+        identifier: &ChannelIdentifier,
         region: Option<Region>,
     ) -> Result<ChannelImage, MCDError> {
-        self.channel_images(&[identifiers], region)
+        self.channel_images(&[identifier.clone()], region)
             .map(|mut data| data.drain(..).last().unwrap())
     }
 
@@ -360,9 +409,12 @@ impl<T: BufRead + Seek> Acquisition<T> {
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
     pub fn channel_images(
         &self,
-        identifiers: &[&ChannelIdentifier],
+        identifiers: &[ChannelIdentifier],
         region: Option<Region>,
     ) -> Result<Vec<ChannelImage>, MCDError> {
+        // println!("Searching identifiers: {:?}", identifiers);
+        // println!("Searching from channels: {:?}", self.channels());
+
         let channels: Option<Vec<_>> = identifiers
             .iter()
             .map(|identifier| self.channel(identifier))
@@ -478,27 +530,23 @@ impl<T: BufRead + Seek> Acquisition<T> {
     /// Returns the channel which matches the given identifier, or None if no match found
     pub fn channel(&self, identifier: &ChannelIdentifier) -> Option<&AcquisitionChannel> {
         for channel in &self.channels {
-            match identifier {
-                ChannelIdentifier::Order(order) => {
-                    if channel.order_number() == *order {
-                        return Some(channel);
-                    }
-                }
-                ChannelIdentifier::Name(name) => {
-                    if channel.name() == name {
-                        return Some(channel);
-                    }
-                }
-                ChannelIdentifier::Label(label) => {
-                    if channel.label() == label {
-                        return Some(channel);
-                    }
-                }
+            if channel.is(identifier) {
+                return Some(channel);
             }
         }
 
         None
     }
+
+    // pub fn channel_index(&self, identifier: &ChannelIdentifier) -> Option<usize> {
+    //     for (index, channel) in self.channels.iter().enumerate() {
+    //         if channel.is(identifier) {
+    //             return Some(index);
+    //         }
+    //     }
+
+    //     None
+    // }
 
     pub(crate) fn fix_roi_start_pos(&mut self) {
         // In version 2 of the schema, it seems like ROIStartXPosUm and ROIStartYPosUm are 1000x what they should be, so try and detect this and correct for it

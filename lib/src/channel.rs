@@ -1,6 +1,8 @@
 /// ChannelIdentifier describes how a channel can be identified
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ChannelIdentifier {
+    // Unique identifier for the channel
+    //Id(u16),
     /// Order number of the channel (order of acquisition)
     Order(i16),
     /// Name of the channel
@@ -34,6 +36,28 @@ impl AcquisitionChannel {
             channel_name: name.to_string(),
             channel_label: label.to_string(),
         }
+    }
+
+    pub fn is(&self, identifier: &ChannelIdentifier) -> bool {
+        match identifier {
+            ChannelIdentifier::Order(order) => {
+                if self.order_number() == *order {
+                    return true;
+                }
+            }
+            ChannelIdentifier::Name(name) => {
+                if self.name() == name {
+                    return true;
+                }
+            }
+            ChannelIdentifier::Label(label) => {
+                if self.label() == label {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Returns the ID associated with the channel

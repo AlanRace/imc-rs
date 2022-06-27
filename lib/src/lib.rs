@@ -593,7 +593,7 @@ pub enum ImageFormat {
 }*/
 
 /// Represents a bounding rectangle
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundingBox<T: num_traits::Num + Copy> {
     /// Minimum x coordinate for the bounding rectangle
     pub min_x: T,
@@ -721,7 +721,7 @@ mod tests {
             let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
             println!("Subimage");
             let data = acquisition.channel_images(
-                &[&channel_identifier],
+                &[channel_identifier.clone()],
                 // None,
                 Some(Region {
                     x: 1000,
