@@ -74,6 +74,21 @@ impl<T> AffineTransform<T>
 where
     T: TransformScalar,
 {
+    pub fn identity() -> Self {
+        let mut matrix = Matrix3::zeros();
+        matrix.m11 = T::one();
+        matrix.m22 = T::one();
+        matrix.m33 = T::one();
+
+        let inv_matrix = matrix.try_inverse();
+
+        AffineTransform {
+            direction: Direction::ToSlide,
+            matrix,
+            inv_matix: inv_matrix,
+        }
+    }
+
     pub fn from_points(moving_points: Vec<Vector2<T>>, fixed_points: Vec<Vector2<T>>) -> Self {
         let moving = to_dmatrix(moving_points);
         let fixed = to_dmatrix(fixed_points);

@@ -232,6 +232,10 @@ impl<T: Seek + BufRead> OnSlide for Panorama<T> {
 
     /// Returns the affine transformation from pixel coordinates within the panorama to to the slide coordinates (μm)
     fn to_slide_transform(&self) -> AffineTransform<f64> {
+        if !self.has_image() {
+            return AffineTransform::identity();
+        }
+
         let mut moving_points = Vec::new();
         let mut fixed_points = Vec::new();
 

@@ -497,7 +497,7 @@ impl<T: Seek + BufRead> MCD<T> {
     }
 
     /// Returns the raw XML metadata stored in the .mcd file
-    pub fn xml(&mut self) -> std::io::Result<String> {
+    pub fn xml(&self) -> std::io::Result<String> {
         let chunk_size: i64 = 1000;
         let mut cur_offset: i64 = 0;
 
