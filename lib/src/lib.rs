@@ -48,7 +48,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::io::{BufRead, Cursor, Seek, SeekFrom};
 
-use std::ops::{Add, DerefMut};
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -153,11 +153,16 @@ pub trait OnSlide {
     fn to_slide_transform(&self) -> AffineTransform<f64>;
 }
 
+/// Represents a region of an image (in pixels)
 #[derive(Debug, Clone, Copy)]
 pub struct Region {
+    /// x-position of the top left corner of the region
     pub x: u32,
+    /// y-position of the top left corner of the region
     pub y: u32,
+    /// width of the region in pixels
     pub width: u32,
+    /// height of the region in pixels
     pub height: u32,
 }
 
@@ -325,6 +330,7 @@ impl<T: Seek + BufRead> MCD<T> {
         None
     }
 
+    /// Returns a list of acquisitions which are at least partially contained within the specified bounding box.
     pub fn acquisitions_in(&self, region: &BoundingBox<f64>) -> Vec<&Acquisition<T>> {
         let mut acquisitions = Vec::new();
 
@@ -433,7 +439,7 @@ impl<T: Seek + BufRead> MCD<T> {
 
     /// Parse *.mcd format
     pub fn parse(reader: T, location: &str) -> std::io::Result<Self> {
-        let mut mcd = MCD::new(reader, location);
+        let mcd = MCD::new(reader, location);
         let combined_xml = mcd.xml()?;
 
         // let mut file = std::fs::File::create("tmp.xml").unwrap();
@@ -606,10 +612,12 @@ pub struct BoundingBox<T: num_traits::Num + Copy> {
 }
 
 impl<T: num_traits::Num + Copy> BoundingBox<T> {
+    /// Maximum x coordinate for the bounding rectangle
     pub fn max_x(&self) -> T {
         self.min_x + self.width
     }
 
+    /// Maximum y coordinate for the bounding rectangle
     pub fn max_y(&self) -> T {
         self.min_y + self.height
     }
@@ -765,7 +773,7 @@ mod tests {
             let mut image_map = HashMap::new();
 
             for acquisition in mcd.acquisitions() {
-                match acquisition.channel_image(
+                if let Ok(data) = acquisition.channel_image(
                     &channel_identifier,
                     // None
                     Some(Region {
@@ -775,12 +783,7 @@ mod tests {
                         height: 500,
                     }),
                 ) {
-                    Ok(data) => {
-                        image_map.insert(format!("{}", acquisition.id()), ChannelImage(data));
-                    }
-                    Err(_) => {
-                        // No such channel, so we don't add data
-                    }
+                    image_map.insert(format!("{}", acquisition.id()), ChannelImage(data));
                 }
             }
 

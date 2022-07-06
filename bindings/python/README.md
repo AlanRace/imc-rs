@@ -83,3 +83,8 @@ channel = channels[9]
 # on the slide where the acquisition was performed, thresholding the intensity at 10
 overview_image = slide.overview_image(7500, channel, 10)
 ```
+
+### Access XML 
+```python
+xml = data.xml()
+```

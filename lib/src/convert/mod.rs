@@ -364,10 +364,10 @@ pub struct DCMLocation {
 }
 
 impl DCMLocation {
-    pub fn read_channel(&self, channel: usize, region: &Region) -> Result<Vec<f32>, MCDError> {
-        self.read_channels(&[channel], region)
-            .map(|mut data| data.drain(..).last().unwrap())
-    }
+    // pub fn read_channel(&self, channel: usize, region: &Region) -> Result<Vec<f32>, MCDError> {
+    //     self.read_channels(&[channel], region)
+    //         .map(|mut data| data.drain(..).last().unwrap())
+    // }
 
     pub fn read_channels(
         &self,

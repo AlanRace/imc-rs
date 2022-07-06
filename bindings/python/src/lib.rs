@@ -89,6 +89,14 @@ impl Mcd {
         })
     }
 
+    /// Returns the XML data found within the .mcd file.
+    pub fn xml(&self) -> PyResult<String> {
+        match self.mcd.xml() {
+            Ok(xml) => Ok(xml),
+            Err(error) => Err(PyErr::new::<exceptions::PyIOError, _>(error)),
+        }
+    }
+
     /// Returns a sorted list of panorama IDs
     pub fn panorama_ids(&self) -> PyResult<Vec<u16>> {
         let mut ids = Vec::new();

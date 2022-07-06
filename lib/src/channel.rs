@@ -38,6 +38,7 @@ impl AcquisitionChannel {
         }
     }
 
+    /// Returns whether the specified channel identifier matches this channel
     pub fn is(&self, identifier: &ChannelIdentifier) -> bool {
         match identifier {
             ChannelIdentifier::Order(order) => {

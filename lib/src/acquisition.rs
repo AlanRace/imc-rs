@@ -31,10 +31,14 @@ pub enum DataFormat {
 //     pub sizes: Vec<u64>,
 // }
 
+/// AcquisitionIdentifier is a way of identifying a specific acquisition
 #[derive(Debug)]
 pub enum AcquisitionIdentifier {
+    /// Identified by unique identifier
     Id(u16),
+    /// Identified by the number specifying the order in which the acquisition was acquired
     Order(i16),
+    /// Match the description of the acquistion (specified by the user)
     Description(String),
 }
 
@@ -59,7 +63,10 @@ pub enum ProfilingType {
     Global,
 }
 
+/// Trait describing a collection of acquisitions and providing methods to summarise
+/// the collection (e.g. to get the list of channels)
 pub trait Acquisitions {
+    /// Returns a list of unique channels from the collection of acquisitions
     fn channels(&self) -> Vec<&AcquisitionChannel>;
 }
 
@@ -282,6 +289,7 @@ impl<T: BufRead + Seek> Acquisition<T> {
         expected_size == measured_size
     }
 
+    /// Returns a `Region` describing the pixel region contained within the specified bounding box
     pub fn pixels_in(&self, region: &BoundingBox<f64>) -> Option<Region> {
         let transform = self.to_slide_transform();
 
@@ -331,6 +339,7 @@ impl<T: BufRead + Seek> Acquisition<T> {
         })
     }
 
+    /// Tests whether the acquisition is (at least partially) contained within the specified bounding box (slide coordinates).
     pub fn in_region(&self, region: &BoundingBox<f64>) -> bool {
         let slide_box = self.slide_bounding_box();
 
@@ -469,8 +478,8 @@ impl<T: BufRead + Seek> Acquisition<T> {
 
             let images: Vec<_> = data
                 .drain(..)
-                .zip(channels.iter())
-                .map(|(data, channel)| {
+                //.zip(channels.iter())
+                .map(|data| {
                     let mut min_value = f32::MAX;
                     let mut max_value = f32::MIN;
 

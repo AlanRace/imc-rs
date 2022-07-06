@@ -1,6 +1,6 @@
 [package]
 name = "pyimc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Alan Race <alan.race@uni-marburg.de>"]
 readme = "README.md"
