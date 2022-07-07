@@ -398,6 +398,8 @@ impl DCMLocation {
                 let start_y = chunk_y * self.details.chunk_size;
                 let end_y = (start_y + self.details.chunk_size).min(self.details.acquired_height());
 
+                let chunk_width = end_x - start_x;
+
                 let chunk_index = (chunk_y * self.details.num_chunks_x()) + chunk_x;
 
                 let pixel_chunk = &self.details.chunks[chunk_index as usize];
@@ -413,12 +415,12 @@ impl DCMLocation {
                     let decompressed_data =
                         lz4_flex::decompress(&buf, channel_chunk.num_intensities as usize * 4)?;
 
+                    let num_bytes = decompressed_data.len();
                     let mut decompressed_data = Cursor::new(decompressed_data);
 
                     for y in start_y..end_y {
                         if region.y > y {
-                            decompressed_data
-                                .seek(SeekFrom::Current(self.details.chunk_size as i64 * 4))?;
+                            decompressed_data.seek(SeekFrom::Current(chunk_width as i64 * 4))?;
 
                             continue;
                         }
@@ -450,8 +452,8 @@ impl DCMLocation {
                                 break;
                             }
 
-                            let intensity = decompressed_data.read_f32::<LittleEndian>()?;
                             let index = ((y - region.y) * region.width) + (x - region.x);
+                            let intensity = decompressed_data.read_f32::<LittleEndian>()?;
 
                             data[index as usize] = intensity;
                         }
