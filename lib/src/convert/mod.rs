@@ -23,7 +23,7 @@ struct AcquisitionOffset {
 // number of acquisitions (u8)
 // offsets for each acquisition ((u16, u64, u8))
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AcquisitionDetails {
     width: u32,
     height: u32,
@@ -66,14 +66,14 @@ impl AcquisitionDetails {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ChannelChunk {
     num_intensities: u64,
     offset: u64,
     length: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PixelChunk {
     channels: Vec<ChannelChunk>,
 }
@@ -357,7 +357,7 @@ pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> Result<(), MCDError> {
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DCMLocation {
     reader: Arc<Mutex<BufReader<File>>>,
     details: AcquisitionDetails,

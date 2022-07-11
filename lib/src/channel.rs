@@ -12,7 +12,7 @@ pub enum ChannelIdentifier {
 }
 
 /// AcquisitionChannel represents a single channel acquired, forming part of an acquisition
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AcquisitionChannel {
     id: u16,
     channel_name: String,
