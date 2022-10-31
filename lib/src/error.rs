@@ -38,4 +38,7 @@ pub enum MCDError {
         /// `AcquisitionIdentifier` used to request a specific channel
         acquisition: AcquisitionIdentifier,
     },
+    /// No slide present in MCD file, so likely this is not a valid .mcd file.
+    #[error("No slide found in MCD file - is this a valid .mcd file?")]
+    NoSlidePresent,
 }

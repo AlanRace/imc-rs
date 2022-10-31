@@ -438,7 +438,7 @@ impl<T: Seek + BufRead> MCD<T> {
     }
 
     /// Parse *.mcd format
-    pub fn parse(reader: T, location: &str) -> std::io::Result<Self> {
+    pub fn parse(reader: T, location: &str) -> Result<Self, MCDError> {
         let mcd = MCD::new(reader, location);
         let combined_xml = mcd.xml()?;
 
@@ -447,12 +447,15 @@ impl<T: Seek + BufRead> MCD<T> {
 
         let mut parser = MCDParser::new(mcd);
 
+        // println!("Found combined XML {}", combined_xml);
+
         let mut reader = quick_xml::Reader::from_str(&combined_xml);
         let mut buf = Vec::with_capacity(BUF_SIZE);
 
         loop {
             match reader.read_event(&mut buf) {
                 Ok(event) => {
+                    // println!("Event: {:?}", event);
                     parser.process(event);
 
                     // Check whether we are finished or have encounted a fatal error
@@ -482,7 +485,13 @@ impl<T: Seek + BufRead> MCD<T> {
             buf.clear();
         }
 
-        Ok(parser.mcd())
+        let mcd = parser.mcd();
+
+        if mcd.slides().is_empty() {
+            Err(MCDError::NoSlidePresent)
+        } else {
+            Ok(mcd)
+        }
     }
 
     /// Parse *.mcd format where a temporary file is generated for faster access to channel images.
@@ -494,7 +503,7 @@ impl<T: Seek + BufRead> MCD<T> {
         let mut mcd = Self::parse(reader, location)?;
 
         if std::fs::metadata(mcd.dcm_file()).is_err() {
-            convert::convert(&mcd).unwrap();
+            convert::convert(&mcd)?;
         }
 
         convert::open(&mut mcd)?;

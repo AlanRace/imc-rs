@@ -117,12 +117,12 @@ pub fn convert<T: BufRead + Seek>(mcd: &MCD<T>) -> Result<(), MCDError> {
             for acquisition in panorama.acquisitions() {
                 let mut acq_details = AcquisitionDetails::from(acquisition, chunk_size);
 
-                println!(
-                    "[{}] Total # chunks: ({}, {})",
-                    acquisition.description(),
-                    acq_details.num_chunks_x(),
-                    acq_details.num_chunks_y()
-                );
+                // println!(
+                //     "[{}] Total # chunks: ({}, {})",
+                //     acquisition.description(),
+                //     acq_details.num_chunks_x(),
+                //     acq_details.num_chunks_y()
+                // );
 
                 for y_chunk in 0..acq_details.num_chunks_y() {
                     for x_chunk in 0..acq_details.num_chunks_x() {
@@ -415,7 +415,6 @@ impl DCMLocation {
                     let decompressed_data =
                         lz4_flex::decompress(&buf, channel_chunk.num_intensities as usize * 4)?;
 
-                    let num_bytes = decompressed_data.len();
                     let mut decompressed_data = Cursor::new(decompressed_data);
 
                     for y in start_y..end_y {

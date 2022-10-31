@@ -140,37 +140,37 @@ impl<T: BufRead + Seek> Clone for Acquisition<T> {
         Self {
             reader: self.reader.clone(),
             dcm_location: self.dcm_location.clone(),
-            id: self.id.clone(),
+            id: self.id,
             description: self.description.clone(),
-            ablation_power: self.ablation_power.clone(),
-            ablation_distance_between_shots_x: self.ablation_distance_between_shots_x.clone(),
-            ablation_distance_between_shots_y: self.ablation_distance_between_shots_y.clone(),
-            ablation_frequency: self.ablation_frequency.clone(),
-            acquisition_roi_id: self.acquisition_roi_id.clone(),
-            order_number: self.order_number.clone(),
+            ablation_power: self.ablation_power,
+            ablation_distance_between_shots_x: self.ablation_distance_between_shots_x,
+            ablation_distance_between_shots_y: self.ablation_distance_between_shots_y,
+            ablation_frequency: self.ablation_frequency,
+            acquisition_roi_id: self.acquisition_roi_id,
+            order_number: self.order_number,
             signal_type: self.signal_type.clone(),
             dual_count_start: self.dual_count_start.clone(),
-            data_start_offset: self.data_start_offset.clone(),
-            data_end_offset: self.data_end_offset.clone(),
+            data_start_offset: self.data_start_offset,
+            data_end_offset: self.data_end_offset,
             start_timestamp: self.start_timestamp.clone(),
             end_timestamp: self.end_timestamp.clone(),
-            after_ablation_image_start_offset: self.after_ablation_image_start_offset.clone(),
-            after_ablation_image_end_offset: self.after_ablation_image_end_offset.clone(),
-            before_ablation_image_start_offset: self.before_ablation_image_start_offset.clone(),
-            before_ablation_image_end_offset: self.before_ablation_image_end_offset.clone(),
-            roi_start_x_pos_um: self.roi_start_x_pos_um.clone(),
-            roi_start_y_pos_um: self.roi_start_y_pos_um.clone(),
-            roi_end_x_pos_um: self.roi_end_x_pos_um.clone(),
-            roi_end_y_pos_um: self.roi_end_y_pos_um.clone(),
+            after_ablation_image_start_offset: self.after_ablation_image_start_offset,
+            after_ablation_image_end_offset: self.after_ablation_image_end_offset,
+            before_ablation_image_start_offset: self.before_ablation_image_start_offset,
+            before_ablation_image_end_offset: self.before_ablation_image_end_offset,
+            roi_start_x_pos_um: self.roi_start_x_pos_um,
+            roi_start_y_pos_um: self.roi_start_y_pos_um,
+            roi_end_x_pos_um: self.roi_end_x_pos_um,
+            roi_end_y_pos_um: self.roi_end_y_pos_um,
             movement_type: self.movement_type.clone(),
             segment_data_format: self.segment_data_format.clone(),
-            value_bytes: self.value_bytes.clone(),
-            max_x: self.max_x.clone(),
-            max_y: self.max_y.clone(),
-            plume_start: self.plume_start.clone(),
-            plume_end: self.plume_end.clone(),
+            value_bytes: self.value_bytes,
+            max_x: self.max_x,
+            max_y: self.max_y,
+            plume_start: self.plume_start,
+            plume_end: self.plume_end,
             template: self.template.clone(),
-            profiling_type: self.profiling_type.clone(),
+            profiling_type: self.profiling_type,
             channels: self.channels.clone(),
         }
     }
@@ -495,9 +495,9 @@ impl<T: BufRead + Seek> Acquisition<T> {
         let valid_region_row = (region.y + region.height).min(last_row as u32);
         let valid_region_col = (region.x + region.width).min(last_col as u32);
 
-        println!("{} / {}", valid_region_row, region.y);
+        // println!("{} / {}", valid_region_row, region.y);
         let valid_pixels = if region.y >= valid_region_row {
-            0
+            (valid_region_row - 1) * region.width + valid_region_col
         } else {
             ((valid_region_row - region.y - 1) * region.width) + (valid_region_col - region.x)
         };

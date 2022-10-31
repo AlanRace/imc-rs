@@ -410,6 +410,18 @@ impl Acquisition {
         Ok(self.slide_id)
     }
 
+    fn description(&self) -> &str {
+        self.get_acquisition().description()
+    }
+
+    fn width(&self) -> i32 {
+        self.get_acquisition().width()
+    }
+
+    fn height(&self) -> i32 {
+        self.get_acquisition().height()
+    }
+
     pub fn before_ablation_image<'py>(&self, py: Python<'py>) -> &'py PyArray3<u8> {
         let acquisition = self.get_acquisition();
 
