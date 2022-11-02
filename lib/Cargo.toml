@@ -6,6 +6,7 @@ authors = ["Alan Race <alan.race@uni-marburg.de>"]
 homepage = "https://github.com/AlanRace/imc-rs"
 license = "MIT"
 repository = "https://github.com/AlanRace/imc-rs.git"
+description = "Library for reading imaging mass cytometry (IMC) data. Supports the .mcd format."
 
 [dependencies]
 quick-xml = "0.23.0"
