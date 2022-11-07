@@ -174,13 +174,9 @@ pub struct CellData {
 impl CellData {
     /// Returns a header `Column` with the specified name
     pub fn header(&self, name: &str) -> Option<&Column> {
-        for header in &self.headers {
-            if header.description.name == name {
-                return Some(header);
-            }
-        }
-
-        None
+        self.headers
+            .iter()
+            .find(|&header| header.description.name == name)
     }
 
     /// Returns the data in the column at the ith position in the file

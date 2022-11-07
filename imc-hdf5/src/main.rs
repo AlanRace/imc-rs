@@ -1,10 +1,10 @@
 #[cfg(feature = "blosc")]
 use hdf5::filters::blosc_set_nthreads;
 
-use std::io::{BufRead, BufReader, Read, Seek};
+use std::io::{BufRead, BufReader, Seek};
 
-use hdf5::{File, Group, H5Type, Location, Result};
-use ndarray::{arr1, arr2, s, Array2};
+use hdf5::{File, Group, Location, Result};
+use ndarray::{arr1, Array2};
 
 use imc_rs::{ChannelIdentifier, OnSlide, OpticalImage, MCD};
 

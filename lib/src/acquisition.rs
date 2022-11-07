@@ -325,7 +325,7 @@ impl<T: BufRead + Seek> Acquisition<T> {
             * self.value_bytes as usize;
         let measured_size: usize = self.data_end_offset as usize - self.data_start_offset as usize;
 
-        println!("Expected: {} | Measured: {}", expected_size, measured_size);
+        // println!("Expected: {} | Measured: {}", expected_size, measured_size);
 
         expected_size == measured_size
     }
@@ -583,13 +583,7 @@ impl<T: BufRead + Seek> Acquisition<T> {
 
     /// Returns the channel which matches the given identifier, or None if no match found
     pub fn channel(&self, identifier: &ChannelIdentifier) -> Option<&AcquisitionChannel> {
-        for channel in &self.channels {
-            if channel.is(identifier) {
-                return Some(channel);
-            }
-        }
-
-        None
+        self.channels.iter().find(|&channel| channel.is(identifier))
     }
 
     // pub fn channel_index(&self, identifier: &ChannelIdentifier) -> Option<usize> {
