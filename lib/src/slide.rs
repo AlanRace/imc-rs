@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    io::{BufRead, Seek},
+    io::{BufReader, Read, Seek},
     sync::{Arc, Mutex},
 };
 
@@ -19,8 +19,8 @@ use crate::mcd::SlideXML;
 
 /// Represents a slide (contains multiple panoramas) in the *.mcd format
 #[derive(Debug)]
-pub struct Slide<T: Seek + BufRead> {
-    pub(crate) reader: Option<Arc<Mutex<T>>>,
+pub struct Slide<R> {
+    pub(crate) reader: Option<Arc<Mutex<BufReader<R>>>>,
 
     id: u16,
     // The newer version of the XSD doesn't have a UID field anymore
@@ -44,10 +44,10 @@ pub struct Slide<T: Seek + BufRead> {
 
     sw_version: String,
 
-    panoramas: HashMap<u16, Panorama<T>>,
+    panoramas: HashMap<u16, Panorama<R>>,
 }
 
-impl<T: Seek + BufRead> From<SlideXML> for Slide<T> {
+impl<R> From<SlideXML> for Slide<R> {
     fn from(slide: SlideXML) -> Self {
         Slide {
             reader: None,
@@ -75,119 +75,7 @@ impl<T: Seek + BufRead> From<SlideXML> for Slide<T> {
     }
 }
 
-impl<T: Seek + BufRead> Slide<T> {
-    /// Returns the slide ID
-    pub fn id(&self) -> u16 {
-        self.id
-    }
-
-    /// Returns the slide UID
-    pub fn uid(&self) -> Option<&str> {
-        match &self.uid {
-            Some(uid) => Some(uid),
-            None => None,
-        }
-    }
-
-    /// Returns the description given to the slide
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-
-    /// Returns the width of the slide in μm
-    pub fn width_in_um(&self) -> f64 {
-        self.width_um
-    }
-
-    /// Returns the height of the slide in μm
-    pub fn height_in_um(&self) -> f64 {
-        self.height_um
-    }
-
-    /// Returns the *.mcd filename
-    pub fn filename(&self) -> &str {
-        &self.filename
-    }
-
-    /// Returns the name of the image file used as a slide image
-    pub fn image_file(&self) -> &str {
-        &self.image_file
-    }
-
-    /// Returns the version of the software used to produce this *.mcd file
-    pub fn software_version(&self) -> &str {
-        &self.sw_version
-    }
-
-    /// Returns the energy in Db
-    pub fn energy_db(&self) -> Option<u32> {
-        self.energy_db
-    }
-
-    /// Returns the frequency
-    pub fn frequency(&self) -> Option<u32> {
-        self.frequency
-    }
-
-    /// Returns the fmark slide length
-    pub fn fmark_slide_length(&self) -> Option<u64> {
-        self.fmark_slide_length
-    }
-
-    /// Returns the fmark slide thickness
-    pub fn fmark_slide_thickness(&self) -> Option<u64> {
-        self.fmark_slide_thickness
-    }
-
-    /// Returns the name given to the slide
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-
-    /// Returns associated image data
-    // pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
-    //     let mutex = self
-    //         .reader
-    //         .as_ref()
-    //         .expect("Should have copied the reader across");
-    //     let reader = mutex.lock().unwrap();
-
-    //     read_image_data(reader, self.image_start_offset, self.image_end_offset)
-    // }
-
-    /// Returns the format describing the binary image data
-    fn image_format(&self) -> ImageFormat {
-        if self.software_version().starts_with('6') {
-            ImageFormat::Jpeg
-        } else {
-            ImageFormat::Png
-        }
-    }
-
-    /// Returns the image associated with the slide
-    pub fn image(&self) -> OpticalImage<T> {
-        OpticalImage {
-            reader: self.reader.as_ref().unwrap().clone(),
-            start_offset: self.image_start_offset,
-            end_offset: self.image_end_offset,
-            image_format: self.image_format(),
-        }
-    }
-
-    // fn dynamic_image(&self) -> DynamicImage {
-    //     let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
-    //     reader.set_format(self.image_format());
-    //     reader.decode().unwrap()
-    // }
-
-    // /// Returns the image associated with the slide.
-    // pub fn image(&self) -> RgbImage {
-    //     match self.dynamic_image() {
-    //         DynamicImage::ImageRgb8(rgb8) => rgb8,
-    //         _ => panic!("Unexpected DynamicImage type"),
-    //     }
-    // }
-
+impl<R: Read + Seek> Slide<R> {
     /// Create an overview image of the slide scaled to the supplied width.
     ///
     /// This will scale the slide image to the supplied width, and overlay any panorama images acquired.
@@ -374,6 +262,120 @@ impl<T: Seek + BufRead> Slide<T> {
 
         Ok(resized_image)
     }
+}
+
+impl<R> Slide<R> {
+    /// Returns the slide ID
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+
+    /// Returns the slide UID
+    pub fn uid(&self) -> Option<&str> {
+        match &self.uid {
+            Some(uid) => Some(uid),
+            None => None,
+        }
+    }
+
+    /// Returns the description given to the slide
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the width of the slide in μm
+    pub fn width_in_um(&self) -> f64 {
+        self.width_um
+    }
+
+    /// Returns the height of the slide in μm
+    pub fn height_in_um(&self) -> f64 {
+        self.height_um
+    }
+
+    /// Returns the *.mcd filename
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+
+    /// Returns the name of the image file used as a slide image
+    pub fn image_file(&self) -> &str {
+        &self.image_file
+    }
+
+    /// Returns the version of the software used to produce this *.mcd file
+    pub fn software_version(&self) -> &str {
+        &self.sw_version
+    }
+
+    /// Returns the energy in Db
+    pub fn energy_db(&self) -> Option<u32> {
+        self.energy_db
+    }
+
+    /// Returns the frequency
+    pub fn frequency(&self) -> Option<u32> {
+        self.frequency
+    }
+
+    /// Returns the fmark slide length
+    pub fn fmark_slide_length(&self) -> Option<u64> {
+        self.fmark_slide_length
+    }
+
+    /// Returns the fmark slide thickness
+    pub fn fmark_slide_thickness(&self) -> Option<u64> {
+        self.fmark_slide_thickness
+    }
+
+    /// Returns the name given to the slide
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Returns associated image data
+    // pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+    //     let mutex = self
+    //         .reader
+    //         .as_ref()
+    //         .expect("Should have copied the reader across");
+    //     let reader = mutex.lock().unwrap();
+
+    //     read_image_data(reader, self.image_start_offset, self.image_end_offset)
+    // }
+
+    /// Returns the format describing the binary image data
+    fn image_format(&self) -> ImageFormat {
+        if self.software_version().starts_with('6') {
+            ImageFormat::Jpeg
+        } else {
+            ImageFormat::Png
+        }
+    }
+
+    /// Returns the image associated with the slide
+    pub fn image(&self) -> OpticalImage<R> {
+        OpticalImage {
+            reader: self.reader.as_ref().unwrap().clone(),
+            start_offset: self.image_start_offset,
+            end_offset: self.image_end_offset,
+            image_format: self.image_format(),
+        }
+    }
+
+    // fn dynamic_image(&self) -> DynamicImage {
+    //     let mut reader = ImageReader::new(Cursor::new(self.image_data().unwrap()));
+    //     reader.set_format(self.image_format());
+    //     reader.decode().unwrap()
+    // }
+
+    // /// Returns the image associated with the slide.
+    // pub fn image(&self) -> RgbImage {
+    //     match self.dynamic_image() {
+    //         DynamicImage::ImageRgb8(rgb8) => rgb8,
+    //         _ => panic!("Unexpected DynamicImage type"),
+    //     }
+    // }
 
     /// Returns a vector of panorama ids sorted by ID number. This allocates a new vector on each call.
     pub fn panorama_ids(&self) -> Vec<u16> {
@@ -389,12 +391,12 @@ impl<T: Seek + BufRead> Slide<T> {
     }
 
     /// Returns panorama with a given ID number, or `None` if no such panorama exists
-    pub fn panorama(&self, id: u16) -> Option<&Panorama<T>> {
+    pub fn panorama(&self, id: u16) -> Option<&Panorama<R>> {
         self.panoramas.get(&id)
     }
 
     /// Returns a vector of references to panoramas sorted by ID number. This allocates a new vector on each call.
-    pub fn panoramas(&self) -> Vec<&Panorama<T>> {
+    pub fn panoramas(&self) -> Vec<&Panorama<R>> {
         let mut panoramas = Vec::new();
 
         let ids = self.panorama_ids();
@@ -408,13 +410,13 @@ impl<T: Seek + BufRead> Slide<T> {
         panoramas
     }
 
-    pub(crate) fn panoramas_mut(&mut self) -> &mut HashMap<u16, Panorama<T>> {
+    pub(crate) fn panoramas_mut(&mut self) -> &mut HashMap<u16, Panorama<R>> {
         &mut self.panoramas
     }
 }
 
 #[rustfmt::skip]
-impl<T: Seek + BufRead> Print for Slide<T> {
+impl<R> Print for Slide<R> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Slide", 36)?;
@@ -506,7 +508,7 @@ impl<T: Seek + BufRead> Print for Slide<T> {
     }
 }
 
-impl<T: Seek + BufRead> fmt::Display for Slide<T> {
+impl<R> fmt::Display for Slide<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }

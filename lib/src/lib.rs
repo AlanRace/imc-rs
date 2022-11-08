@@ -1,11 +1,12 @@
 #![warn(missing_docs)]
-#![warn(rustdoc::missing_doc_code_examples)]
 
 //! This library provides a means of accessing imaging mass cytometry (Fluidigm) data stored in the (*.mcd) format.
 //!
 //! # Example
 //!
-//! ```no_run
+//! To run this example, make sure to first download the test file [20200612_FLU_1923.mcd](https://zenodo.org/record/4110560/files/data/20200612_FLU_1923/20200612_FLU_1923.mcd?download=1) to the `test/` folder.
+//!
+//! ```
 //! extern crate imc_rs;
 //!
 //! use imc_rs::MCD;
@@ -13,11 +14,9 @@
 //! use std::fs::File;
 //!
 //! fn main() {
-//!     let filename = "/location/to/data.mcd";
+//!     let filename = "../test/20200612_FLU_1923.mcd";
 //!     let file = BufReader::new(File::open(filename).unwrap());
 //!     let mcd = MCD::parse_with_dcm(file, filename);
-//!
-//!     
 //! }
 //! ```
 
@@ -46,7 +45,7 @@ use error::MCDError;
 use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
-use std::io::{BufRead, Cursor, Seek, SeekFrom};
+use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
 
 use std::ops::DerefMut;
 use std::path::PathBuf;
@@ -70,15 +69,15 @@ pub trait Print {
 }
 
 /// Represents property of having an optical image
-pub struct OpticalImage<T: Seek + BufRead> {
-    reader: Arc<Mutex<T>>,
+pub struct OpticalImage<R> {
+    reader: Arc<Mutex<BufReader<R>>>,
 
     start_offset: i64,
     end_offset: i64,
     image_format: ImageFormat,
 }
 
-impl<T: Seek + BufRead> OpticalImage<T> {
+impl<R: Read + Seek> OpticalImage<R> {
     /// Returns whether an optical image is present
     //fn has_image(&self) -> bool;
     /// Returns the binary data for the image, exactly as stored in the .mcd file
@@ -99,17 +98,18 @@ impl<T: Seek + BufRead> OpticalImage<T> {
         }
     }
 
-    fn start_offset(&self) -> i64 {
-        self.start_offset + 161
-    }
+    /// Returns the dimensions of the images in pixels as a tuple (width, height)
+    pub fn dimensions(&self) -> ImageResult<(u32, u32)> {
+        let mut guard = self.reader.lock().unwrap();
+        let reader: &mut BufReader<R> = guard.deref_mut();
 
-    fn image_size(&self) -> i64 {
-        self.end_offset - self.start_offset()
-    }
+        let start_offset = self.start_offset();
+        reader.seek(SeekFrom::Start(start_offset as u64))?;
 
-    /// Returns the format of the stored optical image
-    pub fn image_format(&self) -> ImageFormat {
-        self.image_format
+        let mut reader = ImageReader::new(reader);
+        reader.set_format(self.image_format());
+
+        reader.into_dimensions()
     }
 
     /// Returns a decoded RgbaImage of the panorama image
@@ -122,26 +122,27 @@ impl<T: Seek + BufRead> OpticalImage<T> {
         Ok(self.dynamic_image()?.into_rgba8())
     }
 
-    /// Returns the dimensions of the images in pixels as a tuple (width, height)
-    pub fn dimensions(&self) -> ImageResult<(u32, u32)> {
-        let mut guard = self.reader.lock().unwrap();
-        let reader: &mut T = guard.deref_mut();
-
-        let start_offset = self.start_offset();
-        reader.seek(SeekFrom::Start(start_offset as u64))?;
-
-        let mut reader = ImageReader::new(reader);
-        reader.set_format(self.image_format());
-
-        reader.into_dimensions()
-    }
-
     fn dynamic_image(&self) -> Result<DynamicImage, std::io::Error> {
         let mut reader = ImageReader::new(Cursor::new(self.image_data()?));
         reader.set_format(self.image_format);
 
         // TODO: Deal with this error properly
         Ok(reader.decode().unwrap())
+    }
+}
+
+impl<R> OpticalImage<R> {
+    fn start_offset(&self) -> i64 {
+        self.start_offset + 161
+    }
+
+    fn image_size(&self) -> i64 {
+        self.end_offset - self.start_offset()
+    }
+
+    /// Returns the format of the stored optical image
+    pub fn image_format(&self) -> ImageFormat {
+        self.image_format
     }
 }
 
@@ -168,13 +169,13 @@ pub struct Region {
 
 /// Represents a imaging mass cytometry (*.mcd) file.
 #[derive(Debug)]
-pub struct MCD<T: Seek + BufRead> {
-    reader: Arc<Mutex<T>>,
+pub struct MCD<R> {
+    reader: Arc<Mutex<std::io::BufReader<R>>>,
     location: String,
 
     xmlns: Option<String>,
 
-    slides: HashMap<u16, Slide<T>>,
+    slides: HashMap<u16, Slide<R>>,
     //acquisition_order: Vec<String>,
     //acquisitions: HashMap<String, Arc<Acquisition>>,
     //acquisition_rois: Vec<AcquisitionROI>,
@@ -203,10 +204,10 @@ fn u16_from_u8(a: &mut [u16], v: &[u8]) {
     }
 }
 
-impl<T: Seek + BufRead> MCD<T> {
-    fn new(reader: T, location: &str) -> Self {
+impl<R: Read + Seek> MCD<R> {
+    fn new(reader: R, location: &str) -> Self {
         MCD {
-            reader: Arc::new(Mutex::new(reader)),
+            reader: Arc::new(Mutex::new(BufReader::new(reader))),
             location: location.to_owned(),
             xmlns: None,
             slides: HashMap::new(),
@@ -224,6 +225,130 @@ impl<T: Seek + BufRead> MCD<T> {
         }
     }
 
+    /// Parse *.mcd format
+    pub fn parse(reader: R, location: &str) -> Result<Self, MCDError> {
+        let mcd = MCD::new(reader, location);
+        let combined_xml = mcd.xml()?;
+
+        // let mut file = std::fs::File::create("tmp.xml").unwrap();
+        // file.write_all(combined_xml.as_bytes())?;
+
+        let mut parser = MCDParser::new(mcd);
+
+        // println!("Found combined XML {}", combined_xml);
+
+        let mut reader = quick_xml::Reader::from_str(&combined_xml);
+        let mut buf = Vec::with_capacity(BUF_SIZE);
+
+        loop {
+            match reader.read_event(&mut buf) {
+                Ok(event) => {
+                    // println!("Event: {:?}", event);
+                    parser.process(event);
+
+                    // Check whether we are finished or have encounted a fatal error
+                    match parser.current_state() {
+                        ParserState::FatalError => {
+                            let error = match parser.pop_error_back() {
+                                // TODO: Probably a better way of doing this..
+                                Some(value) => value,
+                                None => String::from("unknown error"),
+                            };
+
+                            println!("An fatal error occurred when parsing: {}", error);
+                            break;
+                        }
+                        ParserState::Finished => {
+                            break;
+                        }
+                        _ => (),
+                    }
+                }
+                Err(error) => {
+                    println!("An error occurred when reading: {}", error);
+                    break;
+                }
+            }
+
+            buf.clear();
+        }
+
+        let mcd = parser.mcd();
+
+        if mcd.slides().is_empty() {
+            Err(MCDError::NoSlidePresent)
+        } else {
+            Ok(mcd)
+        }
+    }
+
+    /// Parse *.mcd format where a temporary file is generated for faster access to channel images.
+    ///
+    /// Data is stored in the *.mcd file spectrum-wise which means to load a single image, the entire acquired acquisition must be loaded first.
+    /// This method creates a temporary file (*.dcm) in the same location as the *.mcd file (if it doesn't already exist) which has the channel
+    /// data stored image-wise. If this file is present and loaded, then `Mcd` will choose the fastest method to use to return the requested data.
+    pub fn parse_with_dcm(reader: R, location: &str) -> Result<Self, MCDError> {
+        let mut mcd = Self::parse(reader, location)?;
+
+        if std::fs::metadata(mcd.dcm_file()).is_err() {
+            convert::convert(&mcd)?;
+        }
+
+        convert::open(&mut mcd)?;
+
+        Ok(mcd)
+    }
+
+    /// Returns the raw XML metadata stored in the .mcd file
+    pub fn xml(&self) -> std::io::Result<String> {
+        let chunk_size: i64 = 1000;
+        let mut cur_offset: i64 = 0;
+
+        let mut buf_u8 = vec![0; chunk_size.try_into().unwrap()];
+
+        loop {
+            let mut reader = self.reader.lock().unwrap();
+
+            reader.seek(SeekFrom::End(-cur_offset - chunk_size))?;
+
+            reader.read_exact(&mut buf_u8)?;
+
+            match std::str::from_utf8(&buf_u8) {
+                Ok(_data) => {}
+                Err(_error) => {
+                    // Found the final chunk, so find the start point
+                    let start_index = find_mcd_start(&buf_u8, chunk_size.try_into().unwrap());
+
+                    let total_size = cur_offset + chunk_size - (start_index as i64);
+                    buf_u8 = vec![0; total_size.try_into().unwrap()];
+
+                    reader.seek(SeekFrom::End(-total_size))?;
+                    reader.read_exact(&mut buf_u8)?;
+
+                    break;
+                }
+            }
+
+            cur_offset += chunk_size;
+        }
+
+        let mut combined_xml = String::new();
+
+        let mut buf_u16: Vec<u16> = vec![0; buf_u8.len() / 2];
+        u16_from_u8(&mut buf_u16, &buf_u8);
+
+        match String::from_utf16(&buf_u16) {
+            Ok(data) => combined_xml.push_str(&data),
+            Err(error) => {
+                println!("{}", error)
+            }
+        }
+
+        Ok(combined_xml)
+    }
+}
+
+impl<R> MCD<R> {
     /// Returns the location (path) of the .mcd file
     pub fn location(&self) -> &str {
         &self.location
@@ -236,7 +361,7 @@ impl<T: Seek + BufRead> MCD<T> {
         path
     }
 
-    pub(crate) fn reader(&self) -> &Arc<Mutex<T>> {
+    pub(crate) fn reader(&self) -> &Arc<Mutex<BufReader<R>>> {
         &self.reader
     }
 
@@ -256,12 +381,12 @@ impl<T: Seek + BufRead> MCD<T> {
     }
 
     /// Returns slide with a given ID number, or `None` if no such slide exists
-    pub fn slide(&self, id: u16) -> Option<&Slide<T>> {
+    pub fn slide(&self, id: u16) -> Option<&Slide<R>> {
         self.slides.get(&id)
     }
 
     /// Returns a vector of references to slides sorted by ID number. This allocates a new vector on each call.
-    pub fn slides(&self) -> Vec<&Slide<T>> {
+    pub fn slides(&self) -> Vec<&Slide<R>> {
         let mut slides = Vec::new();
 
         for id in self.slide_ids() {
@@ -274,12 +399,12 @@ impl<T: Seek + BufRead> MCD<T> {
         slides
     }
 
-    fn slides_mut(&mut self) -> &mut HashMap<u16, Slide<T>> {
+    fn slides_mut(&mut self) -> &mut HashMap<u16, Slide<R>> {
         &mut self.slides
     }
 
     /// Return a vector of references to all acquisitions in the .mcd file (iterates over all slides and all panoramas).
-    pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
+    pub fn acquisitions(&self) -> Vec<&Acquisition<R>> {
         let mut acquisitions = HashMap::new();
 
         // This should be unnecessary - hopefully there is only one set of channels per dataset?
@@ -302,7 +427,7 @@ impl<T: Seek + BufRead> MCD<T> {
     }
 
     /// Return an acquisition which matches the supplied `AcquisitionIdentifier` or None if no match found
-    pub fn acquisition(&self, identifier: &AcquisitionIdentifier) -> Option<&Acquisition<T>> {
+    pub fn acquisition(&self, identifier: &AcquisitionIdentifier) -> Option<&Acquisition<R>> {
         for slide in self.slides.values() {
             for panorama in slide.panoramas() {
                 for acquisition in panorama.acquisitions() {
@@ -331,7 +456,7 @@ impl<T: Seek + BufRead> MCD<T> {
     }
 
     /// Returns a list of acquisitions which are at least partially contained within the specified bounding box.
-    pub fn acquisitions_in(&self, region: &BoundingBox<f64>) -> Vec<&Acquisition<T>> {
+    pub fn acquisitions_in(&self, region: &BoundingBox<f64>) -> Vec<&Acquisition<R>> {
         let mut acquisitions = Vec::new();
 
         for slide in self.slides.values() {
@@ -436,132 +561,10 @@ impl<T: Seek + BufRead> MCD<T> {
     pub fn slide_profile(&self, id: u16) -> Option<&SlideProfile> {
         self.slide_profiles.get(&id)
     }
-
-    /// Parse *.mcd format
-    pub fn parse(reader: T, location: &str) -> Result<Self, MCDError> {
-        let mcd = MCD::new(reader, location);
-        let combined_xml = mcd.xml()?;
-
-        // let mut file = std::fs::File::create("tmp.xml").unwrap();
-        // file.write_all(combined_xml.as_bytes())?;
-
-        let mut parser = MCDParser::new(mcd);
-
-        // println!("Found combined XML {}", combined_xml);
-
-        let mut reader = quick_xml::Reader::from_str(&combined_xml);
-        let mut buf = Vec::with_capacity(BUF_SIZE);
-
-        loop {
-            match reader.read_event(&mut buf) {
-                Ok(event) => {
-                    // println!("Event: {:?}", event);
-                    parser.process(event);
-
-                    // Check whether we are finished or have encounted a fatal error
-                    match parser.current_state() {
-                        ParserState::FatalError => {
-                            let error = match parser.pop_error_back() {
-                                // TODO: Probably a better way of doing this..
-                                Some(value) => value,
-                                None => String::from("unknown error"),
-                            };
-
-                            println!("An fatal error occurred when parsing: {}", error);
-                            break;
-                        }
-                        ParserState::Finished => {
-                            break;
-                        }
-                        _ => (),
-                    }
-                }
-                Err(error) => {
-                    println!("An error occurred when reading: {}", error);
-                    break;
-                }
-            }
-
-            buf.clear();
-        }
-
-        let mcd = parser.mcd();
-
-        if mcd.slides().is_empty() {
-            Err(MCDError::NoSlidePresent)
-        } else {
-            Ok(mcd)
-        }
-    }
-
-    /// Parse *.mcd format where a temporary file is generated for faster access to channel images.
-    ///
-    /// Data is stored in the *.mcd file spectrum-wise which means to load a single image, the entire acquired acquisition must be loaded first.
-    /// This method creates a temporary file (*.dcm) in the same location as the *.mcd file (if it doesn't already exist) which has the channel
-    /// data stored image-wise. If this file is present and loaded, then `Mcd` will choose the fastest method to use to return the requested data.
-    pub fn parse_with_dcm(reader: T, location: &str) -> Result<Self, MCDError> {
-        let mut mcd = Self::parse(reader, location)?;
-
-        if std::fs::metadata(mcd.dcm_file()).is_err() {
-            convert::convert(&mcd)?;
-        }
-
-        convert::open(&mut mcd)?;
-
-        Ok(mcd)
-    }
-
-    /// Returns the raw XML metadata stored in the .mcd file
-    pub fn xml(&self) -> std::io::Result<String> {
-        let chunk_size: i64 = 1000;
-        let mut cur_offset: i64 = 0;
-
-        let mut buf_u8 = vec![0; chunk_size.try_into().unwrap()];
-
-        loop {
-            let mut reader = self.reader.lock().unwrap();
-
-            reader.seek(SeekFrom::End(-cur_offset - chunk_size))?;
-
-            reader.read_exact(&mut buf_u8)?;
-
-            match std::str::from_utf8(&buf_u8) {
-                Ok(_data) => {}
-                Err(_error) => {
-                    // Found the final chunk, so find the start point
-                    let start_index = find_mcd_start(&buf_u8, chunk_size.try_into().unwrap());
-
-                    let total_size = cur_offset + chunk_size - (start_index as i64);
-                    buf_u8 = vec![0; total_size.try_into().unwrap()];
-
-                    reader.seek(SeekFrom::End(-total_size))?;
-                    reader.read_exact(&mut buf_u8)?;
-
-                    break;
-                }
-            }
-
-            cur_offset += chunk_size;
-        }
-
-        let mut combined_xml = String::new();
-
-        let mut buf_u16: Vec<u16> = vec![0; buf_u8.len() / 2];
-        u16_from_u8(&mut buf_u16, &buf_u8);
-
-        match String::from_utf16(&buf_u16) {
-            Ok(data) => combined_xml.push_str(&data),
-            Err(error) => {
-                println!("{}", error)
-            }
-        }
-
-        Ok(combined_xml)
-    }
 }
 
 #[rustfmt::skip]
-impl<T: Seek + BufRead> Print for MCD<T> {
+impl<R> Print for MCD<R> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         writeln!(writer, "MCD File: {}", self.location)?;
 
@@ -594,7 +597,7 @@ impl<T: Seek + BufRead> Print for MCD<T> {
     }
 }
 
-impl<T: Seek + BufRead> fmt::Display for MCD<T> {
+impl<R> fmt::Display for MCD<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }

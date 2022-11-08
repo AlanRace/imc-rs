@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    io::{BufRead, Cursor, Seek, SeekFrom},
+    io::{BufReader, Cursor, Read, Seek, SeekFrom},
     sync::{Arc, Mutex, MutexGuard},
 };
 
@@ -70,7 +70,7 @@ pub trait Acquisitions {
     fn channels(&self) -> Vec<&AcquisitionChannel>;
 }
 
-impl<T: BufRead + Seek> Acquisitions for Vec<&Acquisition<T>> {
+impl<R> Acquisitions for Vec<&Acquisition<R>> {
     fn channels(&self) -> Vec<&AcquisitionChannel> {
         let mut channels = HashMap::new();
 
@@ -95,8 +95,8 @@ impl<T: BufRead + Seek> Acquisitions for Vec<&Acquisition<T>> {
 
 /// Acquisition represents a single region analysed by IMC.
 #[derive(Debug)]
-pub struct Acquisition<T: BufRead + Seek> {
-    pub(crate) reader: Option<Arc<Mutex<T>>>,
+pub struct Acquisition<R> {
+    pub(crate) reader: Option<Arc<Mutex<BufReader<R>>>>,
     pub(crate) dcm_location: Option<DCMLocation>,
 
     id: u16,
@@ -135,7 +135,7 @@ pub struct Acquisition<T: BufRead + Seek> {
     channels: Vec<AcquisitionChannel>,
 }
 
-impl<T: BufRead + Seek> Clone for Acquisition<T> {
+impl<R> Clone for Acquisition<R> {
     fn clone(&self) -> Self {
         Self {
             reader: self.reader.clone(),
@@ -176,14 +176,14 @@ impl<T: BufRead + Seek> Clone for Acquisition<T> {
     }
 }
 
-pub struct SpectrumIterator<'a, T: BufRead + Seek> {
-    acquisition: &'a Acquisition<T>,
-    reader: MutexGuard<'a, T>,
+pub struct SpectrumIterator<'a, R> {
+    acquisition: &'a Acquisition<R>,
+    reader: MutexGuard<'a, BufReader<R>>,
     buffer: Vec<u8>,
 }
 
-impl<'a, T: BufRead + Seek> SpectrumIterator<'a, T> {
-    fn new(acquisition: &'a Acquisition<T>) -> Self {
+impl<'a, R: Seek> SpectrumIterator<'a, R> {
+    fn new(acquisition: &'a Acquisition<R>) -> Self {
         let mut reader = acquisition.reader.as_ref().unwrap().lock().unwrap();
 
         let offset = acquisition.data_start_offset as u64;
@@ -199,7 +199,7 @@ impl<'a, T: BufRead + Seek> SpectrumIterator<'a, T> {
     }
 }
 
-impl<'a, T: BufRead + Seek> Iterator for SpectrumIterator<'a, T> {
+impl<'a, R: Read + Seek> Iterator for SpectrumIterator<'a, R> {
     type Item = Vec<f32>;
 
     fn next(&mut self) -> Option<Vec<f32>> {
@@ -223,7 +223,7 @@ impl<'a, T: BufRead + Seek> Iterator for SpectrumIterator<'a, T> {
     }
 }
 
-impl<T: BufRead + Seek> Acquisition<T> {
+impl<R> Acquisition<R> {
     /// Returns the ID associated with the acquisition
     pub fn id(&self) -> u16 {
         self.id
@@ -281,7 +281,7 @@ impl<T: BufRead + Seek> Acquisition<T> {
     }*/
 
     /// Returns the optical image of the acquisition region prior to ablation
-    pub fn before_ablation_image(&self) -> OpticalImage<T> {
+    pub fn before_ablation_image(&self) -> OpticalImage<R> {
         OpticalImage {
             reader: self.reader.as_ref().unwrap().clone(),
             start_offset: self.before_ablation_image_start_offset,
@@ -298,7 +298,7 @@ impl<T: BufRead + Seek> Acquisition<T> {
     }
 
     /// Returns the optical image of the acquisition region after ablation
-    pub fn after_ablation_image(&self) -> OpticalImage<T> {
+    pub fn after_ablation_image(&self) -> OpticalImage<R> {
         OpticalImage {
             reader: self.reader.as_ref().unwrap().clone(),
             start_offset: self.after_ablation_image_start_offset,
@@ -393,41 +393,6 @@ impl<T: BufRead + Seek> Acquisition<T> {
         }
 
         false
-    }
-
-    /// Provides an iterator over all spectra (each pixel) within the acquisition
-    pub fn spectra(&self) -> SpectrumIterator<T> {
-        SpectrumIterator::new(self)
-    }
-
-    /// Returns a spectrum at the specified (x, y) coordinate
-    pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>, MCDError> {
-        let index = y * self.max_x as usize + x;
-
-        if index >= self.num_spectra() {
-            return Err(MCDError::InvalidIndex {
-                index,
-                num_spectra: self.num_spectra(),
-            });
-        }
-
-        let offset = self.data_start_offset as u64
-            + (index * self.channels.len() * self.value_bytes as usize) as u64;
-
-        let mut spectrum = Vec::with_capacity(self.channels.len());
-        let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
-
-        // TODO: Handle this properly without unwrapping
-        reader.seek(SeekFrom::Start(offset)).unwrap();
-
-        let mut buffer = [0u8; 4];
-        for _i in 0..self.channels.len() {
-            reader.read_exact(&mut buffer)?;
-            let float = f32::from_le_bytes(buffer);
-            spectrum.push(float);
-        }
-
-        Ok(spectrum)
     }
 
     /// Returns the size of a single spectrum in bytes
@@ -609,7 +574,44 @@ impl<T: BufRead + Seek> Acquisition<T> {
     }
 }
 
-impl<T: Seek + BufRead> OnSlide for Acquisition<T> {
+impl<R: Read + Seek> Acquisition<R> {
+    /// Provides an iterator over all spectra (each pixel) within the acquisition
+    pub fn spectra(&self) -> SpectrumIterator<R> {
+        SpectrumIterator::new(self)
+    }
+
+    /// Returns a spectrum at the specified (x, y) coordinate
+    pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>, MCDError> {
+        let index = y * self.max_x as usize + x;
+
+        if index >= self.num_spectra() {
+            return Err(MCDError::InvalidIndex {
+                index,
+                num_spectra: self.num_spectra(),
+            });
+        }
+
+        let offset = self.data_start_offset as u64
+            + (index * self.channels.len() * self.value_bytes as usize) as u64;
+
+        let mut spectrum = Vec::with_capacity(self.channels.len());
+        let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
+
+        // TODO: Handle this properly without unwrapping
+        reader.seek(SeekFrom::Start(offset)).unwrap();
+
+        let mut buffer = [0u8; 4];
+        for _i in 0..self.channels.len() {
+            reader.read_exact(&mut buffer)?;
+            let float = f32::from_le_bytes(buffer);
+            spectrum.push(float);
+        }
+
+        Ok(spectrum)
+    }
+}
+
+impl<R> OnSlide for Acquisition<R> {
     /// Returns the affine transformation from pixel coordinates within the acquisition to to the slide coordinates (μm)
     fn to_slide_transform(&self) -> AffineTransform<f64> {
         let mut moving_points = Vec::new();
@@ -675,7 +677,7 @@ impl<T: Seek + BufRead> OnSlide for Acquisition<T> {
 }
 
 #[rustfmt::skip]
-impl<T: Seek + BufRead> Print for Acquisition<T> {
+impl<R> Print for Acquisition<R> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Acquisition", 48)?;
@@ -812,13 +814,13 @@ impl<T: Seek + BufRead> Print for Acquisition<T> {
     }
 }
 
-impl<T: Seek + BufRead> fmt::Display for Acquisition<T> {
+impl<R> fmt::Display for Acquisition<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
 }
 
-impl<T: Seek + BufRead> From<AcquisitionXML> for Acquisition<T> {
+impl<R> From<AcquisitionXML> for Acquisition<R> {
     fn from(acquisition: AcquisitionXML) -> Self {
         Acquisition {
             reader: None,

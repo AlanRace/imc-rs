@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    io::{BufRead, Seek},
+    io::{BufReader, Read, Seek},
     sync::{Arc, Mutex},
 };
 
@@ -22,8 +22,8 @@ pub enum PanoramaType {
 
 /// Represents a panorama (containing one or more acquisitions)
 #[derive(Debug)]
-pub struct Panorama<T: Seek + BufRead> {
-    pub(crate) reader: Option<Arc<Mutex<T>>>,
+pub struct Panorama<R> {
+    pub(crate) reader: Option<Arc<Mutex<BufReader<R>>>>,
 
     id: u16,
     slide_id: u16,
@@ -48,10 +48,22 @@ pub struct Panorama<T: Seek + BufRead> {
     is_locked: Option<bool>,
     rotation_angle: Option<u16>,
 
-    acquisitions: HashMap<u16, Acquisition<T>>,
+    acquisitions: HashMap<u16, Acquisition<R>>,
 }
 
-impl<T: Seek + BufRead> Panorama<T> {
+impl<R: Read + Seek> Panorama<R> {
+    pub(crate) fn fix_image_dimensions(&mut self) {
+        if self.has_image() && (self.pixel_width == 0 || self.pixel_height == 0) {
+            let image = self.image().unwrap();
+            let dims = image.dimensions().unwrap();
+
+            self.pixel_width = dims.0 as i64;
+            self.pixel_height = dims.1 as i64;
+        }
+    }
+}
+
+impl<R> Panorama<R> {
     /// Returns the panorama ID
     pub fn id(&self) -> u16 {
         self.id
@@ -106,12 +118,12 @@ impl<T: Seek + BufRead> Panorama<T> {
     }
 
     /// Returns an acquisition with the supplied ID, or None if none exists
-    pub fn acquisition(&self, id: u16) -> Option<&Acquisition<T>> {
+    pub fn acquisition(&self, id: u16) -> Option<&Acquisition<R>> {
         self.acquisitions.get(&id)
     }
 
     /// Returns a vector of acquisition references ordered by acquistion ID number
-    pub fn acquisitions(&self) -> Vec<&Acquisition<T>> {
+    pub fn acquisitions(&self) -> Vec<&Acquisition<R>> {
         let mut acquisitions = Vec::new();
 
         let ids = self.acquisition_ids();
@@ -125,18 +137,8 @@ impl<T: Seek + BufRead> Panorama<T> {
         acquisitions
     }
 
-    pub(crate) fn acquisitions_mut(&mut self) -> &mut HashMap<u16, Acquisition<T>> {
+    pub(crate) fn acquisitions_mut(&mut self) -> &mut HashMap<u16, Acquisition<R>> {
         &mut self.acquisitions
-    }
-
-    pub(crate) fn fix_image_dimensions(&mut self) {
-        if self.has_image() && (self.pixel_width == 0 || self.pixel_height == 0) {
-            let image = self.image().unwrap();
-            let dims = image.dimensions().unwrap();
-
-            self.pixel_width = dims.0 as i64;
-            self.pixel_height = dims.1 as i64;
-        }
     }
 
     /// Returns true if an image is associated with this panorama
@@ -145,7 +147,7 @@ impl<T: Seek + BufRead> Panorama<T> {
     }
 
     /// Returns the optical image
-    pub fn image(&self) -> Option<OpticalImage<T>> {
+    pub fn image(&self) -> Option<OpticalImage<R>> {
         if self.has_image() {
             Some(OpticalImage {
                 reader: self.reader.as_ref()?.clone(),
@@ -190,7 +192,7 @@ impl<T: Seek + Read> OpticalImage for Panorama<T> {
     }
 } */
 
-impl<T: Seek + BufRead> OnSlide for Panorama<T> {
+impl<R> OnSlide for Panorama<R> {
     /// Returns the bounding box encompasing the panorama image area on the slide (in μm)
     fn slide_bounding_box(&self) -> BoundingBox<f64> {
         let min_x = f64::min(
@@ -262,7 +264,7 @@ impl<T: Seek + BufRead> OnSlide for Panorama<T> {
 }
 
 #[rustfmt::skip]
-impl<T: Seek + BufRead> Print for Panorama<T> {
+impl<R> Print for Panorama<R> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
         write!(writer, "{:indent$}", "", indent = indent)?;
         writeln!(writer, "{:-^1$}", "Panorama", 42)?;
@@ -347,13 +349,13 @@ impl<T: Seek + BufRead> Print for Panorama<T> {
     }
 }
 
-impl<T: Seek + BufRead + 'static> fmt::Display for Panorama<T> {
+impl<R> fmt::Display for Panorama<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.print(f, 0)
     }
 }
 
-impl<T: Seek + BufRead> From<PanoramaXML> for Panorama<T> {
+impl<R> From<PanoramaXML> for Panorama<R> {
     fn from(panorama: PanoramaXML) -> Self {
         Panorama {
             reader: None,

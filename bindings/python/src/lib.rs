@@ -49,7 +49,10 @@ impl Mcd {
             Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
         };
 
-        let mcd = imc_rs::MCD::parse(BufReader::new(file), filename)?;
+        let mcd = match imc_rs::MCD::parse(BufReader::new(file), filename) {
+            Ok(mcd) => mcd,
+            Err(error) => return Err(PyMcdError::from(error).into()),
+        };
 
         Ok(Mcd { mcd: Arc::new(mcd) })
     }

@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write},
+    io::{BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
 
@@ -35,7 +35,7 @@ struct AcquisitionDetails {
 }
 
 impl AcquisitionDetails {
-    fn from<T: BufRead + Seek>(acquisition: &Acquisition<T>, chunk_size: u32) -> Self {
+    fn from<R>(acquisition: &Acquisition<R>, chunk_size: u32) -> Self {
         AcquisitionDetails {
             width: acquisition.width() as u32,
             height: acquisition.height() as u32,
@@ -86,7 +86,7 @@ impl PixelChunk {
     }
 }
 
-pub fn convert<T: BufRead + Seek>(mcd: &MCD<T>) -> Result<(), MCDError> {
+pub fn convert<R: Read + Seek>(mcd: &MCD<R>) -> Result<(), MCDError> {
     //let mut acquisition_offsets = HashMap::new();
     //println!("Opening {:?} for writing", mcd.dcm_file());
     let dcm_file = std::fs::File::create(mcd.dcm_file())?;
@@ -313,7 +313,7 @@ impl<T: WriteBytesExt> WriteDCM for T {
     }
 }
 
-pub fn open<T: BufRead + Seek>(mcd: &mut MCD<T>) -> Result<(), MCDError> {
+pub fn open<R: Read + Seek>(mcd: &mut MCD<R>) -> Result<(), MCDError> {
     //println!("Opening {:?} for reading", mcd.dcm_file());
     let dcm_file = std::fs::File::open(mcd.dcm_file())?;
     let dcm_file_arc = Arc::new(Mutex::new(BufReader::new(dcm_file)));

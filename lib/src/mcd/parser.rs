@@ -131,22 +131,22 @@ pub enum ParserState {
     Finished,
 }
 
-pub struct MCDParser<T: Seek + BufRead> {
-    pub(crate) current_mcd: Option<MCD<T>>,
+pub struct MCDParser<R> {
+    pub(crate) current_mcd: Option<MCD<R>>,
 
     state: ParserState,
     sub_state: ParserState,
     //pub(super) history: Vec<String>,
     errors: std::collections::VecDeque<String>,
 
-    panoramas: HashMap<u16, Panorama<T>>,
+    panoramas: HashMap<u16, Panorama<R>>,
     calibration_finals: HashMap<u16, CalibrationFinal>,
     calibration_params: HashMap<u16, CalibrationParams>,
     calibration_channels: HashMap<u16, CalibrationChannel>,
     calibrations: HashMap<u16, Calibration>,
     slide_fiducal_marks: HashMap<u16, SlideFiducialMarks>,
     slide_profiles: HashMap<u16, SlideProfile>,
-    acquisitions: HashMap<u16, Acquisition<T>>,
+    acquisitions: HashMap<u16, Acquisition<R>>,
     acquisition_channels: Vec<AcquisitionChannel>,
     acquisition_rois: Vec<AcquisitionROI>,
 
@@ -166,8 +166,8 @@ pub struct MCDParser<T: Seek + BufRead> {
     current_roi_point: Option<ROIPoint>,
 }
 
-impl<T: Seek + BufRead> MCDParser<T> {
-    pub fn new(mcd: MCD<T>) -> MCDParser<T> {
+impl<R: Read + Seek> MCDParser<R> {
+    pub fn new(mcd: MCD<R>) -> MCDParser<R> {
         MCDParser {
             current_mcd: Some(mcd),
             state: ParserState::Start,
@@ -203,7 +203,7 @@ impl<T: Seek + BufRead> MCDParser<T> {
         }
     }
 
-    pub fn mcd(&mut self) -> MCD<T> {
+    pub fn mcd(&mut self) -> MCD<R> {
         let mut mcd = self
             .current_mcd
             .take()
