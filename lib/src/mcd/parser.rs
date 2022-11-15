@@ -731,6 +731,7 @@ impl<R: Read + Seek> MCDParser<R> {
                                 panorama.is_locked = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingRotationAngle => {
+                                println!("{:?}", text);
                                 panorama.rotation_angle = Some(text.parse().unwrap())
                             }
                             ParserState::Processing => {}

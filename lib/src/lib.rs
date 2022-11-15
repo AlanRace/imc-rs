@@ -822,7 +822,6 @@ mod tests {
     #[test]
     fn test_load() -> Result<()> {
         let filename = "../test/20200612_FLU_1923.mcd";
-        let filename = "/media/alan/DATA1/Greg/20220106_lung_biopsies_daria.mcd";
 
         let start = Instant::now();
         let mcd = MCD::from_path(filename).unwrap();

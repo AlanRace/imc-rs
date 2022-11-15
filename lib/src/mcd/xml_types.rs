@@ -228,7 +228,7 @@ pub(crate) struct PanoramaXML {
 
     pub(crate) panorama_type: Option<PanoramaType>,
     pub(crate) is_locked: Option<bool>,
-    pub(crate) rotation_angle: Option<u16>,
+    pub(crate) rotation_angle: Option<f64>,
 }
 
 impl PanoramaXML {

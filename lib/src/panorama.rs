@@ -46,7 +46,7 @@ pub struct Panorama<R> {
 
     panorama_type: Option<PanoramaType>,
     is_locked: Option<bool>,
-    rotation_angle: Option<u16>,
+    rotation_angle: Option<f64>,
 
     acquisitions: HashMap<u16, Acquisition<R>>,
 }
@@ -100,7 +100,7 @@ impl<R> Panorama<R> {
     }
 
     /// Returns the rotation angle of the panorama (if known). This is unknown in the first version of the schema
-    pub fn rotation_angle(&self) -> Option<u16> {
+    pub fn rotation_angle(&self) -> Option<f64> {
         self.rotation_angle
     }
 
