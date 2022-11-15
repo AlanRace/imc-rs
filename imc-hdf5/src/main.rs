@@ -1,7 +1,7 @@
 #[cfg(feature = "blosc")]
 use hdf5::filters::blosc_set_nthreads;
 
-use std::io::{BufRead, BufReader, Seek};
+use std::io::{Read, Seek};
 
 use hdf5::{File, Group, Location, Result};
 use ndarray::{arr1, Array2};
@@ -16,10 +16,10 @@ pub fn create_str_attr(location: &Location, name: &str, value: &str) -> Result<(
     attr.write_scalar(&value_)
 }
 
-pub fn add_image<T: BufRead + Seek>(
+pub fn add_image<R: Read + Seek>(
     location: &Group,
     name: &str,
-    image: OpticalImage<T>,
+    image: OpticalImage<R>,
 ) -> Result<()> {
     let builder = location.new_dataset_builder();
     #[cfg(feature = "blosc")]
@@ -35,7 +35,7 @@ pub fn add_image<T: BufRead + Seek>(
     Ok(())
 }
 
-fn write_hdf5<T: BufRead + Seek>(mcd: MCD<T>, name: &str) -> Result<()> {
+fn write_hdf5<R: Read + Seek>(mcd: MCD<R>, name: &str) -> Result<()> {
     let file = File::create(format!("{}.h5", name))?; // open for writing
 
     #[cfg(feature = "blosc")]
@@ -176,8 +176,7 @@ fn write_hdf5<T: BufRead + Seek>(mcd: MCD<T>, name: &str) -> Result<()> {
 fn main() {
     let filename = "/media/alan/DATA/PuffPiece/AZ_NS_Puff piece slide_358_398_BCI.mcd";
 
-    let file = BufReader::new(std::fs::File::open(filename).unwrap());
-    let mcd = MCD::parse_with_dcm(file, filename).unwrap();
+    let mcd = MCD::from_path(filename).unwrap().with_dcm().unwrap();
 
     write_hdf5(mcd, filename).unwrap();
 }

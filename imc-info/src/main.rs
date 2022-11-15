@@ -79,8 +79,13 @@ fn main() {
         _ => println!("Don't be ridiculous"),
     }*/
 
-    let file = std::fs::File::open(&opts.filename).unwrap();
-    let mcd = MCD::parse(BufReader::new(file), &opts.filename).unwrap();
+    let mcd = match MCD::from_path(&opts.filename) {
+        Ok(mcd) => mcd,
+        Err(err) => {
+            println!("Error: {:?}", err.to_string());
+            return;
+        }
+    };
 
     // You can handle information about subcommands by requesting their matches by name
     // (as below), requesting just the name used, or both at the same time

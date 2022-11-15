@@ -15,8 +15,12 @@
 //!
 //! fn main() {
 //!     let filename = "../test/20200612_FLU_1923.mcd";
-//!     let file = BufReader::new(File::open(filename).unwrap());
-//!     let mcd = MCD::parse_with_dcm(file, filename);
+//!
+//!     let mcd = MCD::from_path(filename).unwrap();
+//!
+//!     // Optionally we can load/create the .dcm file for fast access to images
+//!     let mcd = mcd.with_dcm().unwrap();
+//!
 //! }
 //! ```
 
@@ -41,14 +45,15 @@ pub use self::channel::{AcquisitionChannel, ChannelIdentifier};
 pub use self::panorama::Panorama;
 pub use self::slide::Slide;
 
-use error::MCDError;
+use error::{MCDError, Result};
 use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
+use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
 
 use std::ops::DerefMut;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
@@ -81,7 +86,7 @@ impl<R: Read + Seek> OpticalImage<R> {
     /// Returns whether an optical image is present
     //fn has_image(&self) -> bool;
     /// Returns the binary data for the image, exactly as stored in the .mcd file
-    pub fn image_data(&self) -> Result<Vec<u8>, std::io::Error> {
+    pub fn image_data(&self) -> Result<Vec<u8>> {
         let mut reader = self.reader.lock().unwrap();
 
         let start_offset = self.start_offset();
@@ -92,9 +97,9 @@ impl<R: Read + Seek> OpticalImage<R> {
         match reader.seek(SeekFrom::Start(start_offset as u64)) {
             Ok(_seek) => match reader.read_exact(&mut buf_u8) {
                 Ok(()) => Ok(buf_u8),
-                Err(error) => Err(error),
+                Err(error) => Err(error.into()),
             },
-            Err(error) => Err(error),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -113,7 +118,7 @@ impl<R: Read + Seek> OpticalImage<R> {
     }
 
     /// Returns a decoded RgbaImage of the panorama image
-    pub fn as_rgba8(&self) -> Result<RgbaImage, std::io::Error> {
+    pub fn as_rgba8(&self) -> Result<RgbaImage> {
         // match self.dynamic_image()? {
         //     DynamicImage::ImageRgba8(rgba8) => Ok(rgba8),
         //     DynamicImage::ImageRgb8(rgb8) => Ok(DynamicImage::ImageRgb8(rgb8).into_rgba8()),
@@ -122,7 +127,7 @@ impl<R: Read + Seek> OpticalImage<R> {
         Ok(self.dynamic_image()?.into_rgba8())
     }
 
-    fn dynamic_image(&self) -> Result<DynamicImage, std::io::Error> {
+    fn dynamic_image(&self) -> Result<DynamicImage> {
         let mut reader = ImageReader::new(Cursor::new(self.image_data()?));
         reader.set_format(self.image_format);
 
@@ -171,7 +176,7 @@ pub struct Region {
 #[derive(Debug)]
 pub struct MCD<R> {
     reader: Arc<Mutex<std::io::BufReader<R>>>,
-    location: String,
+    location: Option<PathBuf>,
 
     xmlns: Option<String>,
 
@@ -204,11 +209,62 @@ fn u16_from_u8(a: &mut [u16], v: &[u8]) {
     }
 }
 
+impl MCD<File> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<MCD<File>> {
+        let mut mcd = MCD::parse(File::open(&path)?)?;
+        mcd.set_location(path);
+
+        Ok(mcd)
+    }
+
+    /// Returns the location (path) of the .mcd file
+    pub fn location(&self) -> Option<&Path> {
+        Some(self.location.as_ref()?.as_path())
+    }
+
+    /// Returns the location (path) of the .mcd file
+    pub fn set_location<P: AsRef<Path>>(&mut self, location: P) {
+        let mut path_buf = PathBuf::new();
+        path_buf.push(location);
+
+        self.location = Some(path_buf);
+    }
+
+    pub(crate) fn dcm_file(&self) -> Option<PathBuf> {
+        let mut path = PathBuf::from(self.location()?);
+        path.set_extension("dcm");
+
+        Some(path)
+    }
+
+    /// Use a temporary file for faster access to channel images.
+    ///
+    /// If this file does not already exist, then it is created.
+    ///
+    /// Data is stored in the *.mcd file spectrum-wise which means to load a single image, the entire acquired acquisition must be loaded first.
+    /// This method creates a temporary file (*.dcm) in the same location as the *.mcd file (if it doesn't already exist) which has the channel
+    /// data stored image-wise. If this file is present and loaded, then `Mcd` will choose the fastest method to use to return the requested data.
+    ///
+    /// # Errors
+    ///
+    /// If the location is not set either automatically via [`MCD::from_path`] or manually via [`MCD::set_location`] then a [`MCDError::LocationNotSpecified`]
+    /// will occur.
+    pub fn with_dcm(mut self) -> Result<Self> {
+        if std::fs::metadata(self.dcm_file().ok_or(MCDError::LocationNotSpecified)?).is_err() {
+            convert::convert(&self)?;
+        }
+
+        convert::open(&mut self)?;
+
+        Ok(self)
+    }
+}
+
 impl<R: Read + Seek> MCD<R> {
-    fn new(reader: R, location: &str) -> Self {
+    fn new(reader: R) -> Self {
         MCD {
             reader: Arc::new(Mutex::new(BufReader::new(reader))),
-            location: location.to_owned(),
+            location: None,
             xmlns: None,
             slides: HashMap::new(),
             //panoramas: HashMap::new(),
@@ -226,8 +282,8 @@ impl<R: Read + Seek> MCD<R> {
     }
 
     /// Parse *.mcd format
-    pub fn parse(reader: R, location: &str) -> Result<Self, MCDError> {
-        let mcd = MCD::new(reader, location);
+    pub fn parse(reader: R) -> Result<Self> {
+        let mcd = MCD::new(reader);
         let combined_xml = mcd.xml()?;
 
         // let mut file = std::fs::File::create("tmp.xml").unwrap();
@@ -238,10 +294,10 @@ impl<R: Read + Seek> MCD<R> {
         // println!("Found combined XML {}", combined_xml);
 
         let mut reader = quick_xml::Reader::from_str(&combined_xml);
-        let mut buf = Vec::with_capacity(BUF_SIZE);
+        // let mut buf = Vec::with_capacity(BUF_SIZE);
 
         loop {
-            match reader.read_event(&mut buf) {
+            match reader.read_event() {
                 Ok(event) => {
                     // println!("Event: {:?}", event);
                     parser.process(event);
@@ -270,7 +326,7 @@ impl<R: Read + Seek> MCD<R> {
                 }
             }
 
-            buf.clear();
+            // buf.clear();
         }
 
         let mcd = parser.mcd();
@@ -280,23 +336,6 @@ impl<R: Read + Seek> MCD<R> {
         } else {
             Ok(mcd)
         }
-    }
-
-    /// Parse *.mcd format where a temporary file is generated for faster access to channel images.
-    ///
-    /// Data is stored in the *.mcd file spectrum-wise which means to load a single image, the entire acquired acquisition must be loaded first.
-    /// This method creates a temporary file (*.dcm) in the same location as the *.mcd file (if it doesn't already exist) which has the channel
-    /// data stored image-wise. If this file is present and loaded, then `Mcd` will choose the fastest method to use to return the requested data.
-    pub fn parse_with_dcm(reader: R, location: &str) -> Result<Self, MCDError> {
-        let mut mcd = Self::parse(reader, location)?;
-
-        if std::fs::metadata(mcd.dcm_file()).is_err() {
-            convert::convert(&mcd)?;
-        }
-
-        convert::open(&mut mcd)?;
-
-        Ok(mcd)
     }
 
     /// Returns the raw XML metadata stored in the .mcd file
@@ -349,18 +388,6 @@ impl<R: Read + Seek> MCD<R> {
 }
 
 impl<R> MCD<R> {
-    /// Returns the location (path) of the .mcd file
-    pub fn location(&self) -> &str {
-        &self.location
-    }
-
-    pub(crate) fn dcm_file(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.location);
-        path.set_extension("dcm");
-
-        path
-    }
-
     pub(crate) fn reader(&self) -> &Arc<Mutex<BufReader<R>>> {
         &self.reader
     }
@@ -427,11 +454,16 @@ impl<R> MCD<R> {
     }
 
     /// Return an acquisition which matches the supplied `AcquisitionIdentifier` or None if no match found
-    pub fn acquisition(&self, identifier: &AcquisitionIdentifier) -> Option<&Acquisition<R>> {
+    pub fn acquisition<A: Into<AcquisitionIdentifier>>(
+        &self,
+        identifier: A,
+    ) -> Option<&Acquisition<R>> {
+        let identifier = identifier.into();
+
         for slide in self.slides.values() {
             for panorama in slide.panoramas() {
                 for acquisition in panorama.acquisitions() {
-                    match identifier {
+                    match &identifier {
                         AcquisitionIdentifier::Id(id) => {
                             if acquisition.id() == *id {
                                 return Some(acquisition);
@@ -566,7 +598,7 @@ impl<R> MCD<R> {
 #[rustfmt::skip]
 impl<R> Print for MCD<R> {
     fn print<W: fmt::Write + ?Sized>(&self, writer: &mut W, indent: usize) -> fmt::Result {
-        writeln!(writer, "MCD File: {}", self.location)?;
+        // writeln!(writer, "MCD File: {}", self.location)?;
 
         match self.xmlns.as_ref() {
             Some(xmlns) => writeln!(writer, "XML Namespace: {}", xmlns)?,
@@ -677,135 +709,381 @@ impl ChannelImage {
     }
 }
 
+struct Cell {
+    markers: Vec<Summary<f32>>,
+}
+
+#[derive(Debug, Clone)]
+struct Summary<T> {
+    mean: T,
+    std: T,
+    range: (T, T),
+    median: T,
+}
+
+struct Phenotype {
+    description: String,
+    rule: Rule,
+}
+
+impl Phenotype {
+    pub fn matches(
+        &self,
+        channels: &[AcquisitionChannel],
+        spectrum: &[Summary<f32>],
+    ) -> Result<bool> {
+        self.rule.matches(channels, spectrum)
+    }
+}
+
+impl AsRef<Rule> for Phenotype {
+    fn as_ref(&self) -> &Rule {
+        &self.rule
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Direction {
+    Above,
+    Below,
+}
+
+#[derive(Debug, Clone)]
+enum Interval {
+    Closed,
+    Open,
+}
+
+#[derive(Debug, Clone)]
+enum Rule {
+    Threshold(ChannelIdentifier, f32, Direction, Interval),
+    And(Box<Rule>, Box<Rule>),
+    Or(Box<Rule>, Box<Rule>),
+}
+
+impl Rule {
+    pub fn and<A: AsRef<Rule>, B: AsRef<Rule>>(left: A, right: B) -> Self {
+        Self::And(
+            Box::new(left.as_ref().clone()),
+            Box::new(right.as_ref().clone()),
+        )
+    }
+
+    pub fn matches(
+        &self,
+        channels: &[AcquisitionChannel],
+        spectrum: &[Summary<f32>],
+    ) -> Result<bool> {
+        match self {
+            Rule::Threshold(identifier, threshold, direction, interval) => {
+                for (channel, summary) in channels.iter().zip(spectrum) {
+                    if channel.is(identifier) {
+                        match (direction, interval) {
+                            (Direction::Above, Interval::Closed) => {
+                                return Ok(summary.mean >= *threshold)
+                            }
+                            (Direction::Above, Interval::Open) => {
+                                return Ok(summary.mean > *threshold)
+                            }
+                            (Direction::Below, Interval::Closed) => {
+                                return Ok(summary.mean <= *threshold)
+                            }
+                            (Direction::Below, Interval::Open) => {
+                                return Ok(summary.mean < *threshold)
+                            }
+                        }
+                    }
+                }
+
+                // We didn't find the channel in the list of channels, so something went wrong
+                Err(MCDError::InvalidChannel {
+                    channel: identifier.clone(),
+                })
+            }
+            Rule::And(left, right) => {
+                Ok(left.matches(channels, spectrum)? && right.matches(channels, spectrum)?)
+            }
+            Rule::Or(left, right) => {
+                Ok(left.matches(channels, spectrum)? || right.matches(channels, spectrum)?)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use image::{ImageBuffer, Pixel, Rgba};
+    use image::{GenericImageView, ImageBuffer, Pixel, Rgba};
+    use tiff::decoder::Decoder;
 
     use super::*;
 
-    use std::fs::File;
-
-    use std::io::BufReader;
     use std::time::Instant;
 
     #[test]
-    fn test_all_in_folder() -> Result<(), MCDError> {
-        let paths = std::fs::read_dir("/home/alan/Documents/Work/Nicole/Salmonella").unwrap();
+    fn test_load() -> Result<()> {
+        let filename = "../test/20200612_FLU_1923.mcd";
+        let filename = "/media/alan/DATA1/Greg/20220106_lung_biopsies_daria.mcd";
 
-        for path in paths {
-            let path = path?;
+        let start = Instant::now();
+        let mcd = MCD::from_path(filename).unwrap();
+        println!("Time taken to parse .mcd: {:?}", start.elapsed());
 
-            if path.path().extension().unwrap() != "mcd" {
-                println!("Skipping {:?} file.", path.path().extension().unwrap());
-                continue;
-            }
+        // Optionally we can load/create the .dcm file for fast access to images
+        let start = Instant::now();
+        let mcd = mcd.with_dcm().unwrap();
+        println!("Time taken to parse .dcm: {:?}", start.elapsed());
 
-            let file = BufReader::new(File::open(path.path()).unwrap());
-            let mcd = MCD::parse_with_dcm(file, path.path().to_str().unwrap())?;
+        let start = Instant::now();
+        let roi_001 = mcd.acquisition("ROI_001").unwrap();
+        println!("Time taken to find acquisition: {:?}", start.elapsed());
 
-            // let overview_image = mcd.slides()[0].create_overview_image(7500, None).unwrap();
+        let dna = roi_001.channel(ChannelIdentifier::label("DNA1")).unwrap();
 
-            // overview_image.save("overview.png").unwrap();
+        // Available here: https://zenodo.org/record/4139443#.Y2okw0rMLmE
 
-            //let _xml = mcd.xml()?;
+        let img_file = File::open("../test/20200612_FLU_1923-01_full_mask.tiff")?;
+        let mut decoder = Decoder::new(img_file).expect("Cannot create decoder");
 
-            //println!("{}", xml);
+        let (width, height) = decoder.dimensions().unwrap();
 
-            for acquisition in mcd.acquisitions() {
-                println!("[{}] {}", acquisition.id(), acquisition.description());
-            }
+        let mut cells: HashMap<u16, Vec<_>> = HashMap::new();
+        let image = decoder.read_image().unwrap();
 
-            let acquisition = mcd.acquisitions()[0];
+        match image {
+            tiff::decoder::DecodingResult::U16(cell_data) => {
+                for y in 0..height {
+                    for x in 0..width {
+                        let index = (y * width) + x;
 
-            let acquisition = mcd
-                .acquisition(&AcquisitionIdentifier::Description(
-                    acquisition.description().to_string(),
-                ))
-                .unwrap();
-
-            let x_channel = acquisition
-                .channel_image(&ChannelIdentifier::Name("X".to_string()), None)
-                .unwrap();
-
-            println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
-
-            for channel in mcd.channels_excluding(vec!["ROI 12", "ROI 13", "ROI 14", "ROI 16"]) {
-                println!(
-                    "[Channel {}] {} | {}",
-                    channel.id(),
-                    channel.label(),
-                    channel.name()
-                );
-            }
-
-            let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
-            println!("Subimage");
-            let data = acquisition.channel_images(
-                &[channel_identifier.clone()],
-                // None,
-                Some(Region {
-                    x: 1000,
-                    y: 1000,
-                    width: 500,
-                    height: 500,
-                }),
-            )?;
-
-            let data = &data[0];
-
-            let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
-                ImageBuffer::new(data.width(), data.height());
-
-            let mut index = 0;
-            let max_value = 20.0;
-            for y in 0..data.height() {
-                if index >= data.valid_pixels {
-                    break;
-                }
-
-                for x in 0..data.width() {
-                    if index >= data.valid_pixels {
-                        break;
+                        if cell_data[index as usize] > 0 {
+                            match cells.entry(cell_data[index as usize]) {
+                                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                    entry.get_mut().push((x, y));
+                                }
+                                std::collections::hash_map::Entry::Vacant(entry) => {
+                                    entry.insert(vec![(x, y)]);
+                                }
+                            }
+                        }
                     }
-
-                    let g = ((data.data[index] / max_value) * 255.0) as u8;
-                    let g = g as f64 / 255.0;
-
-                    let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
-                    cur_pixel[1] = (g * 255.0) as u8;
-                    cur_pixel[3] = 255;
-
-                    index += 1;
                 }
             }
-
-            acq_image.save("dna.png").unwrap();
-
-            let start = Instant::now();
-            let mut image_map = HashMap::new();
-
-            for acquisition in mcd.acquisitions() {
-                if let Ok(data) = acquisition.channel_image(
-                    &channel_identifier,
-                    // None
-                    Some(Region {
-                        x: 1000,
-                        y: 1000,
-                        width: 500,
-                        height: 500,
-                    }),
-                ) {
-                    image_map.insert(format!("{}", acquisition.id()), ChannelImage(data));
-                }
-            }
-
-            let duration = start.elapsed();
-
-            println!("Time elapsed loading data is: {:?}", duration);
+            _ => todo!(),
         }
+
+        println!("Detected {} cells.", cells.len());
+        println!("Time taken to detect cells: {:?}", start.elapsed());
+
+        let cell = cells.get(&1).unwrap();
+
+        println!(
+            "{:?}",
+            roi_001
+                .channels()
+                .iter()
+                .map(|channel| channel.label())
+                .collect::<Vec<_>>()
+        );
+
+        // cell types: https://github.com/camlab-bioml/astir/blob/master/tests/test-data/jackson-2020-markers.yml
+
+        let phenotype_histone = Phenotype {
+            description: "Histone+".to_string(),
+            rule: Rule::Threshold(
+                ChannelIdentifier::label("HistoneH3"),
+                2.0,
+                Direction::Above,
+                Interval::Open,
+            ),
+        };
+
+        let phenotype_cd16 = Phenotype {
+            description: "CD16+".to_string(),
+            rule: Rule::Threshold(
+                ChannelIdentifier::label("CD16"),
+                1.0,
+                Direction::Above,
+                Interval::Open,
+            ),
+        };
+
+        let combined = Phenotype {
+            description: "combined".to_string(),
+            rule: Rule::and(&phenotype_histone, &phenotype_cd16),
+        };
+
+        for (index, cell) in cells {
+            let mut spectrum = vec![Vec::with_capacity(cell.len()); roi_001.channels().len()];
+
+            for (x, y) in cell {
+                spectrum
+                    .iter_mut()
+                    .zip(roi_001.spectrum(x as usize, y as usize).unwrap().iter())
+                    .for_each(|(s, i)| s.push(*i));
+            }
+
+            let summaries = spectrum
+                .drain(..)
+                .map(|mut intensities| {
+                    intensities.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                    // println!("{:?}", intensities);
+
+                    let mean: f32 = intensities.iter().sum::<f32>() / intensities.len() as f32;
+
+                    let variance: f32 =
+                        intensities.iter().map(|x| (*x - mean).powi(2)).sum::<f32>()
+                            / intensities.len() as f32;
+
+                    let median = if intensities.len() % 2 == 0 {
+                        let mid_point = intensities.len() / 2;
+
+                        (intensities[mid_point] + intensities[mid_point - 1]) * 0.5
+                    } else {
+                        intensities[(intensities.len() - 1) / 2]
+                    };
+
+                    Summary {
+                        mean,
+                        median,
+                        range: (intensities[0], intensities[intensities.len() - 1]),
+                        std: variance.sqrt(),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            // println!("{:?}", summaries);
+            // if combined.matches(roi_001.channels(), &spectrum) {
+            // println!(
+            //     "[{}] {:?} {:?} {:?}",
+            //     index,
+            //     phenotype_histone.matches(roi_001.channels(), &summaries),
+            //     phenotype_cd16.matches(roi_001.channels(), &summaries),
+            //     combined.matches(roi_001.channels(), &summaries)
+            // );
+            // }
+        }
+
+        // println!("{:?}", cell);
 
         Ok(())
     }
 
-    pub struct ChannelImage(crate::ChannelImage);
+    // #[test]
+    // fn test_all_in_folder() -> Result<()> {
+    //     let paths = std::fs::read_dir("test/").unwrap();
+
+    //     for path in paths {
+    //         let path = path?;
+
+    //         if path.path().extension().unwrap() != "mcd" {
+    //             println!("Skipping {:?} file.", path.path().extension().unwrap());
+    //             continue;
+    //         }
+
+    //         let mcd = MCD::from_path(path.path())?.with_dcm()?;
+
+    //         // let overview_image = mcd.slides()[0].create_overview_image(7500, None).unwrap();
+
+    //         // overview_image.save("overview.png").unwrap();
+
+    //         //let _xml = mcd.xml()?;
+
+    //         //println!("{}", xml);
+
+    //         for acquisition in mcd.acquisitions() {
+    //             println!("[{}] {}", acquisition.id(), acquisition.description());
+    //         }
+
+    //         let acquisition = mcd.acquisitions()[0];
+
+    //         let acquisition = mcd
+    //             .acquisition(&AcquisitionIdentifier::Description(
+    //                 acquisition.description().to_string(),
+    //             ))
+    //             .unwrap();
+
+    //         let x_channel = acquisition
+    //             .channel_image(&ChannelIdentifier::Name("X".to_string()), None)
+    //             .unwrap();
+
+    //         println!("Loaded X Channel : {:?}", x_channel.num_valid_pixels());
+
+    //         for channel in mcd.channels_excluding(vec!["ROI 12", "ROI 13", "ROI 14", "ROI 16"]) {
+    //             println!(
+    //                 "[Channel {}] {} | {}",
+    //                 channel.id(),
+    //                 channel.label(),
+    //                 channel.name()
+    //             );
+    //         }
+
+    //         let channel_identifier = ChannelIdentifier::Name("Ir(191)".to_string());
+    //         println!("Subimage");
+    //         let data = acquisition.channel_images(
+    //             &[channel_identifier.clone()],
+    //             // None,
+    //             Some(Region {
+    //                 x: 1000,
+    //                 y: 1000,
+    //                 width: 500,
+    //                 height: 500,
+    //             }),
+    //         )?;
+
+    //         let data = &data[0];
+
+    //         let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+    //             ImageBuffer::new(data.width(), data.height());
+
+    //         let mut index = 0;
+    //         let max_value = 20.0;
+    //         for y in 0..data.height() {
+    //             if index >= data.valid_pixels {
+    //                 break;
+    //             }
+
+    //             for x in 0..data.width() {
+    //                 if index >= data.valid_pixels {
+    //                     break;
+    //                 }
+
+    //                 let g = ((data.data[index] / max_value) * 255.0) as u8;
+    //                 let g = g as f64 / 255.0;
+
+    //                 let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+    //                 cur_pixel[1] = (g * 255.0) as u8;
+    //                 cur_pixel[3] = 255;
+
+    //                 index += 1;
+    //             }
+    //         }
+
+    //         // acq_image.save("dna.png").unwrap();
+
+    //         // let start = Instant::now();
+    //         // let mut image_map = HashMap::new();
+
+    //         // for acquisition in mcd.acquisitions() {
+    //         //     if let Ok(data) = acquisition.channel_image(
+    //         //         &channel_identifier,
+    //         //         // None
+    //         //         Some(Region {
+    //         //             x: 1000,
+    //         //             y: 1000,
+    //         //             width: 500,
+    //         //             height: 500,
+    //         //         }),
+    //         //     ) {
+    //         //         image_map.insert(format!("{}", acquisition.id()), ChannelImage(data));
+    //         //     }
+    //         // }
+
+    //         // let duration = start.elapsed();
+
+    //         // println!("Time elapsed loading data is: {:?}", duration);
+    //     }
+
+    //     Ok(())
+    // }
 }

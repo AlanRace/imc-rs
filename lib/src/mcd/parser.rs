@@ -292,7 +292,7 @@ impl<R: Read + Seek> MCDParser<R> {
 
     pub fn process(&mut self, ev: Event) {
         match &ev {
-            Event::Start(e) | Event::Empty(e) => match e.local_name() {
+            Event::Start(e) | Event::Empty(e) => match e.local_name().as_ref() {
                 b"MCDSchema" => {
                     // TODO: get xmlns
                     //self.current_mcd = Some()
@@ -476,7 +476,7 @@ impl<R: Read + Seek> MCDParser<R> {
                 b"SlideYPosUm" => self.sub_state = ParserState::ProcessingSlideYPosUm,
                 b"PanoramaPixelXPos" => self.sub_state = ParserState::ProcessingPanoramaPixelXPos,
                 b"PanoramaPixelYPos" => self.sub_state = ParserState::ProcessingPanoramaPixelYPos,
-                _ => match std::str::from_utf8(e.local_name()) {
+                _ => match std::str::from_utf8(e.local_name().as_ref()) {
                     Ok(name) => {
                         self.errors
                             .push_back(format!("[Start] Unknown tag name: {}", name));
@@ -490,7 +490,7 @@ impl<R: Read + Seek> MCDParser<R> {
                     }
                 },
             },
-            Event::End(e) => match e.local_name() {
+            Event::End(e) => match e.local_name().as_ref() {
                 b"Slide" => {
                     let slide = self.current_slide.take().unwrap();
                     self.current_mcd
@@ -584,7 +584,7 @@ impl<R: Read + Seek> MCDParser<R> {
                     self.state = ParserState::Processing
                 }
                 b"MCDSchema" => self.state = ParserState::Finished,
-                _ => match std::str::from_utf8(e.local_name()) {
+                _ => match std::str::from_utf8(e.local_name().into_inner()) {
                     Ok(name) => {
                         self.errors
                             .push_back(format!("[End] Unknown tag name: {}", name));
@@ -601,8 +601,8 @@ impl<R: Read + Seek> MCDParser<R> {
                 match self.state {
                     ParserState::ProcessingSlide => {
                         let slide = self.current_slide.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => slide.id = Some(text.parse().unwrap()),
@@ -655,8 +655,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingPanorama => {
                         let panorama = self.current_panorama.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => panorama.id = Some(text.parse().unwrap()),
@@ -703,7 +703,8 @@ impl<R: Read + Seek> MCDParser<R> {
                                 panorama.pixel_height = Some(text.parse().unwrap())
                             }
                             ParserState::ProcessingImageFormat => {
-                                match std::str::from_utf8(&e.unescaped().unwrap()).as_ref() {
+                                match std::str::from_utf8(e.unescape().unwrap().as_bytes()).as_ref()
+                                {
                                     Ok(&"PNG") => panorama.image_format = Some(ImageFormat::Png),
                                     Ok(_) => todo!(),
                                     Err(_) => todo!(),
@@ -746,8 +747,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingCalibrationFinal => {
                         let calibration_final = self.current_calibration_final.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -809,8 +810,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingCalibrationParams => {
                         let calibration_params = self.current_calibration_params.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingCalibrationID => {
@@ -865,8 +866,8 @@ impl<R: Read + Seek> MCDParser<R> {
                     ParserState::ProcessingCalibrationChannel => {
                         let calibration_channel =
                             self.current_calibration_channel.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -895,8 +896,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingCalibration => {
                         let calibration = self.current_calibration.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -923,8 +924,8 @@ impl<R: Read + Seek> MCDParser<R> {
                     ParserState::ProcessingSlideFiducialMarks => {
                         let slide_fiducal_marks =
                             self.current_slide_fiducial_marks.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -953,8 +954,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingSlideProfile => {
                         let slide_profile = self.current_slide_profile.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -984,8 +985,8 @@ impl<R: Read + Seek> MCDParser<R> {
                     ParserState::ProcessingAcquisitionChannel => {
                         let acquisition_channel =
                             self.current_acquisition_channel.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -1027,8 +1028,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingAcquisition => {
                         let acquisition = self.current_acquisition.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -1154,8 +1155,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingAcquisitionROI => {
                         let acquisition_roi = self.current_acquisition_roi.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => {
@@ -1189,8 +1190,8 @@ impl<R: Read + Seek> MCDParser<R> {
 
                     ParserState::ProcessingROIPoint => {
                         let roi_point = self.current_roi_point.as_mut().unwrap();
-                        let unprocessed_text = &e.unescaped().unwrap();
-                        let text = std::str::from_utf8(unprocessed_text).unwrap();
+                        let unprocessed_text = e.unescape().unwrap();
+                        let text = std::str::from_utf8(unprocessed_text.as_bytes()).unwrap();
 
                         match self.sub_state {
                             ParserState::ProcessingID => roi_point.id = Some(text.parse().unwrap()),

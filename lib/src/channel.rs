@@ -11,6 +11,26 @@ pub enum ChannelIdentifier {
     Label(String),
 }
 
+impl ChannelIdentifier {
+    pub fn label(label: &str) -> Self {
+        Self::Label(label.into())
+    }
+
+    pub fn name(name: &str) -> Self {
+        Self::Name(name.into())
+    }
+
+    pub fn order(order: i16) -> Self {
+        Self::Order(order)
+    }
+}
+
+impl AsRef<ChannelIdentifier> for ChannelIdentifier {
+    fn as_ref(&self) -> &ChannelIdentifier {
+        self
+    }
+}
+
 /// AcquisitionChannel represents a single channel acquired, forming part of an acquisition
 #[derive(Debug, Clone)]
 pub struct AcquisitionChannel {

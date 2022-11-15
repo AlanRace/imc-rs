@@ -12,7 +12,7 @@ use nalgebra::Vector2;
 use crate::{
     channel::{AcquisitionChannel, ChannelIdentifier},
     convert::DCMLocation,
-    error::MCDError,
+    error::{MCDError, Result},
     mcd::AcquisitionXML,
     transform::AffineTransform,
     BoundingBox, ChannelImage, OnSlide, OpticalImage, Print, Region,
@@ -40,6 +40,19 @@ pub enum AcquisitionIdentifier {
     Order(i16),
     /// Match the description of the acquistion (specified by the user)
     Description(String),
+}
+
+impl AcquisitionIdentifier {
+    /// Create an acquisition identifier based on a description
+    pub fn description(description: &str) -> Self {
+        AcquisitionIdentifier::Description(description.into())
+    }
+}
+
+impl From<&str> for AcquisitionIdentifier {
+    fn from(description: &str) -> Self {
+        Self::Description(description.into())
+    }
 }
 
 impl fmt::Display for AcquisitionIdentifier {
@@ -411,33 +424,33 @@ impl<R> Acquisition<R> {
 
     /// Returns the ChannelImage for the channel matching the `ChannelIdentifier`. This contains the intensities of the channel
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
-    pub fn channel_image(
+    pub fn channel_image<C: AsRef<ChannelIdentifier>>(
         &self,
-        identifier: &ChannelIdentifier,
+        identifier: C,
         region: Option<Region>,
-    ) -> Result<ChannelImage, MCDError> {
-        self.channel_images(&[identifier.clone()], region)
+    ) -> Result<ChannelImage> {
+        self.channel_images(&[identifier], region)
             .map(|mut data| data.drain(..).last().unwrap())
     }
 
     /// Returns array of ChannelImages for the channels matching the `ChannelIdentifier`s. This contains the intensities of the channel
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
-    pub fn channel_images(
+    pub fn channel_images<C: AsRef<ChannelIdentifier>>(
         &self,
-        identifiers: &[ChannelIdentifier],
+        identifiers: &[C],
         region: Option<Region>,
-    ) -> Result<Vec<ChannelImage>, MCDError> {
+    ) -> Result<Vec<ChannelImage>> {
         // println!("Searching identifiers: {:?}", identifiers);
         // println!("Searching from channels: {:?}", self.channels());
 
-        let channels: Option<Vec<_>> = identifiers
+        let channels: Vec<_> = identifiers
             .iter()
-            .map(|identifier| self.channel(identifier))
-            .collect();
-
-        let channels = channels.ok_or(MCDError::NoSuchChannel {
-            acquisition: AcquisitionIdentifier::Id(self.id),
-        })?;
+            .map(|identifier| {
+                self.channel(identifier).ok_or(MCDError::InvalidChannel {
+                    channel: identifier.as_ref().clone(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let order_numbers: Vec<_> = channels
             .iter()
@@ -547,8 +560,13 @@ impl<R> Acquisition<R> {
     }
 
     /// Returns the channel which matches the given identifier, or None if no match found
-    pub fn channel(&self, identifier: &ChannelIdentifier) -> Option<&AcquisitionChannel> {
-        self.channels.iter().find(|&channel| channel.is(identifier))
+    pub fn channel<C: AsRef<ChannelIdentifier>>(
+        &self,
+        identifier: C,
+    ) -> Option<&AcquisitionChannel> {
+        self.channels
+            .iter()
+            .find(|&channel| channel.is(identifier.as_ref()))
     }
 
     // pub fn channel_index(&self, identifier: &ChannelIdentifier) -> Option<usize> {
@@ -581,7 +599,7 @@ impl<R: Read + Seek> Acquisition<R> {
     }
 
     /// Returns a spectrum at the specified (x, y) coordinate
-    pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>, MCDError> {
+    pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>> {
         let index = y * self.max_x as usize + x;
 
         if index >= self.num_spectra() {

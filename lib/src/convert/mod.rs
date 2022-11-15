@@ -86,10 +86,10 @@ impl PixelChunk {
     }
 }
 
-pub fn convert<R: Read + Seek>(mcd: &MCD<R>) -> Result<(), MCDError> {
+pub fn convert(mcd: &MCD<File>) -> Result<(), MCDError> {
     //let mut acquisition_offsets = HashMap::new();
     //println!("Opening {:?} for writing", mcd.dcm_file());
-    let dcm_file = std::fs::File::create(mcd.dcm_file())?;
+    let dcm_file = std::fs::File::create(mcd.dcm_file().ok_or(MCDError::LocationNotSpecified)?)?;
     let mut dcm_file = BufWriter::new(dcm_file);
 
     let mut num_acquisitions = 0;
@@ -313,9 +313,9 @@ impl<T: WriteBytesExt> WriteDCM for T {
     }
 }
 
-pub fn open<R: Read + Seek>(mcd: &mut MCD<R>) -> Result<(), MCDError> {
+pub fn open(mcd: &mut MCD<File>) -> Result<(), MCDError> {
     //println!("Opening {:?} for reading", mcd.dcm_file());
-    let dcm_file = std::fs::File::open(mcd.dcm_file())?;
+    let dcm_file = std::fs::File::open(mcd.dcm_file().ok_or(MCDError::LocationNotSpecified)?)?;
     let dcm_file_arc = Arc::new(Mutex::new(BufReader::new(dcm_file)));
     let mut dcm_file = dcm_file_arc.lock().unwrap();
 
