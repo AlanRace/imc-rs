@@ -146,6 +146,9 @@ impl<R: Read + Seek> OpticalImage<R> {
                 let mut reader = ImageReader::new(reader.deref_mut());
                 reader.set_format(self.image_format);
 
+                // Remove the limits here, as it is possible that the images are larger than 512 MB
+                reader.no_limits();
+
                 Ok(reader.decode()?)
             }
             Err(error) => Err(error.into()),
