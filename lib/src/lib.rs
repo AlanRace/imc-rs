@@ -62,7 +62,7 @@ use std::collections::HashMap;
 use calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams};
 use mcd::{MCDParser, ParserState};
 
-use image::{DynamicImage, ImageFormat, RgbaImage};
+use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
 use slide::{SlideFiducialMarks, SlideProfile};
 use transform::AffineTransform;
 
@@ -129,20 +129,27 @@ impl<R: Read + Seek> OpticalImage<R> {
 
     /// Returns a decoded RgbaImage of the panorama image
     pub fn as_rgba8(&self) -> Result<RgbaImage> {
-        // match self.dynamic_image()? {
-        //     DynamicImage::ImageRgba8(rgba8) => Ok(rgba8),
-        //     DynamicImage::ImageRgb8(rgb8) => Ok(DynamicImage::ImageRgb8(rgb8).into_rgba8()),
-        //     _ => panic!("Unexpected DynamicImage type"),
-        // }
         Ok(self.dynamic_image()?.into_rgba8())
     }
 
-    fn dynamic_image(&self) -> Result<DynamicImage> {
-        let mut reader = ImageReader::new(Cursor::new(self.image_data()?));
-        reader.set_format(self.image_format);
+    /// Returns a decoded RgbImage of the panorama image
+    pub fn as_rgb8(&self) -> Result<RgbImage> {
+        Ok(self.dynamic_image()?.into_rgb8())
+    }
 
-        // TODO: Deal with this error properly
-        Ok(reader.decode()?)
+    fn dynamic_image(&self) -> Result<DynamicImage> {
+        let mut reader = self.reader.lock().or(Err(MCDError::PoisonMutex))?;
+        let start_offset = self.start_offset();
+
+        match reader.seek(SeekFrom::Start(start_offset as u64)) {
+            Ok(_seek) => {
+                let mut reader = ImageReader::new(reader.deref_mut());
+                reader.set_format(self.image_format);
+
+                Ok(reader.decode()?)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
