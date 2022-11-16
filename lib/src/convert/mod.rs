@@ -86,11 +86,12 @@ impl PixelChunk {
     }
 }
 
-pub fn convert(mcd: &MCD<File>) -> Result<(), MCDError> {
+pub fn convert<R: Read + Seek, W: Write + Seek>(
+    mcd: &MCD<R>,
+    mut dcm_file: W,
+) -> Result<(), MCDError> {
     //let mut acquisition_offsets = HashMap::new();
     //println!("Opening {:?} for writing", mcd.dcm_file());
-    let dcm_file = std::fs::File::create(mcd.dcm_file().ok_or(MCDError::LocationNotSpecified)?)?;
-    let mut dcm_file = BufWriter::new(dcm_file);
 
     let mut num_acquisitions = 0;
 

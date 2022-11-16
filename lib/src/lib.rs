@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+#![warn(clippy::unwrap_used)]
 
 //! This library provides a means of accessing imaging mass cytometry (Fluidigm) data stored in the (*.mcd) format.
 //!
@@ -24,7 +25,7 @@
 //! }
 //! ```
 
-mod convert;
+pub mod convert;
 /// Errors associated with parsing IMC data
 pub mod error;
 pub(crate) mod mcd;
@@ -50,7 +51,7 @@ use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
 use std::fs::File;
-use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
+use std::io::{BufReader, BufWriter, Cursor, Read, Seek, SeekFrom};
 
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
@@ -61,7 +62,7 @@ use std::collections::HashMap;
 use calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams};
 use mcd::{MCDParser, ParserState};
 
-use image::{DynamicImage, ImageFormat, ImageResult, RgbaImage};
+use image::{DynamicImage, ImageFormat, RgbaImage};
 use slide::{SlideFiducialMarks, SlideProfile};
 use transform::AffineTransform;
 
@@ -77,6 +78,7 @@ pub trait Print {
 pub struct OpticalImage<R> {
     reader: Arc<Mutex<BufReader<R>>>,
 
+    // TODO: Why are we using i64 here?
     start_offset: i64,
     end_offset: i64,
     image_format: ImageFormat,
@@ -87,10 +89,15 @@ impl<R: Read + Seek> OpticalImage<R> {
     //fn has_image(&self) -> bool;
     /// Returns the binary data for the image, exactly as stored in the .mcd file
     pub fn image_data(&self) -> Result<Vec<u8>> {
-        let mut reader = self.reader.lock().unwrap();
+        let mut reader = self.reader.lock().or(Err(MCDError::PoisonMutex))?;
 
         let start_offset = self.start_offset();
-        let image_size = self.image_size().try_into().unwrap();
+        let image_size = self
+            .image_size()
+            .try_into()
+            .or(Err(MCDError::InvalidOffset {
+                offset: start_offset,
+            }))?;
 
         let mut buf_u8 = vec![0; image_size];
 
@@ -104,8 +111,8 @@ impl<R: Read + Seek> OpticalImage<R> {
     }
 
     /// Returns the dimensions of the images in pixels as a tuple (width, height)
-    pub fn dimensions(&self) -> ImageResult<(u32, u32)> {
-        let mut guard = self.reader.lock().unwrap();
+    pub fn dimensions(&self) -> Result<(u32, u32)> {
+        let mut guard = self.reader.lock().or(Err(MCDError::PoisonMutex))?;
         let reader: &mut BufReader<R> = guard.deref_mut();
 
         let start_offset = self.start_offset();
@@ -114,7 +121,10 @@ impl<R: Read + Seek> OpticalImage<R> {
         let mut reader = ImageReader::new(reader);
         reader.set_format(self.image_format());
 
-        reader.into_dimensions()
+        match reader.into_dimensions() {
+            Ok(dims) => Ok(dims),
+            Err(error) => Err(MCDError::from(error)),
+        }
     }
 
     /// Returns a decoded RgbaImage of the panorama image
@@ -132,7 +142,7 @@ impl<R: Read + Seek> OpticalImage<R> {
         reader.set_format(self.image_format);
 
         // TODO: Deal with this error properly
-        Ok(reader.decode().unwrap())
+        Ok(reader.decode()?)
     }
 }
 
@@ -251,7 +261,11 @@ impl MCD<File> {
     /// will occur.
     pub fn with_dcm(mut self) -> Result<Self> {
         if std::fs::metadata(self.dcm_file().ok_or(MCDError::LocationNotSpecified)?).is_err() {
-            convert::convert(&self)?;
+            let dcm_file =
+                std::fs::File::create(self.dcm_file().ok_or(MCDError::LocationNotSpecified)?)?;
+            let mut dcm_file = BufWriter::new(dcm_file);
+
+            convert::convert(&self, &mut dcm_file)?;
         }
 
         convert::open(&mut self)?;
@@ -342,15 +356,19 @@ impl<R: Read + Seek> MCD<R> {
 
     /// Returns the raw XML metadata stored in the .mcd file
     pub fn xml(&self) -> Result<String> {
-        let chunk_size: i64 = 1000;
+        let chunk_size_i64: i64 = 1000;
         let mut cur_offset: i64 = 0;
 
-        let mut buf_u8 = vec![0; chunk_size.try_into().unwrap()];
+        let chunk_size = chunk_size_i64.try_into().or(Err(MCDError::InvalidOffset {
+            offset: chunk_size_i64,
+        }))?;
+
+        let mut buf_u8 = vec![0; chunk_size];
 
         loop {
-            let mut reader = self.reader.lock().unwrap();
+            let mut reader = self.reader.lock().or(Err(MCDError::PoisonMutex))?;
 
-            reader.seek(SeekFrom::End(-cur_offset - chunk_size))?;
+            reader.seek(SeekFrom::End(-cur_offset - chunk_size_i64))?;
 
             reader.read_exact(&mut buf_u8)?;
 
@@ -358,10 +376,15 @@ impl<R: Read + Seek> MCD<R> {
                 Ok(_data) => {}
                 Err(_error) => {
                     // Found the final chunk, so find the start point
-                    let start_index = find_mcd_start(&buf_u8, chunk_size.try_into().unwrap());
+                    let start_index = find_mcd_start(&buf_u8, chunk_size);
 
-                    let total_size = cur_offset + chunk_size - (start_index as i64);
-                    buf_u8 = vec![0; total_size.try_into().unwrap()];
+                    let total_size = cur_offset + chunk_size_i64 - (start_index as i64);
+                    buf_u8 = vec![
+                        0;
+                        total_size
+                            .try_into()
+                            .or(Err(MCDError::InvalidOffset { offset: total_size }))?
+                    ];
 
                     reader.seek(SeekFrom::End(-total_size))?;
                     reader.read_exact(&mut buf_u8)?;
@@ -370,7 +393,7 @@ impl<R: Read + Seek> MCD<R> {
                 }
             }
 
-            cur_offset += chunk_size;
+            cur_offset += chunk_size_i64;
         }
 
         let mut combined_xml = String::new();
@@ -822,12 +845,12 @@ mod tests {
         let filename = "../test/20200612_FLU_1923.mcd";
 
         let start = Instant::now();
-        let mcd = MCD::from_path(filename).unwrap();
+        let mcd = MCD::from_path(filename)?;
         println!("Time taken to parse .mcd: {:?}", start.elapsed());
 
         // Optionally we can load/create the .dcm file for fast access to images
         let start = Instant::now();
-        let mcd = mcd.with_dcm().unwrap();
+        let mcd = mcd.with_dcm()?;
         println!("Time taken to parse .dcm: {:?}", start.elapsed());
 
         let start = Instant::now();
@@ -915,7 +938,7 @@ mod tests {
             for (x, y) in cell {
                 spectrum
                     .iter_mut()
-                    .zip(roi_001.spectrum(x as usize, y as usize).unwrap().iter())
+                    .zip(roi_001.spectrum(x as usize, y as usize)?.iter())
                     .for_each(|(s, i)| s.push(*i));
             }
 
