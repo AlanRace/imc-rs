@@ -5,6 +5,7 @@ use quick_xml::events::Event;
 use crate::{
     acquisition::{DataFormat, ProfilingType},
     calibration::{Calibration, CalibrationChannel, CalibrationFinal, CalibrationParams},
+    error::MCDError,
     panorama::PanoramaType,
     slide::{SlideFiducialMarks, SlideProfile},
 };
@@ -137,7 +138,7 @@ pub struct MCDParser<R> {
     state: ParserState,
     sub_state: ParserState,
     //pub(super) history: Vec<String>,
-    errors: std::collections::VecDeque<String>,
+    errors: std::collections::VecDeque<MCDError>,
 
     panoramas: HashMap<u16, Panorama<R>>,
     calibration_finals: HashMap<u16, CalibrationFinal>,
@@ -282,11 +283,11 @@ impl<R: Read + Seek> MCDParser<R> {
         !self.errors.is_empty()
     }
     #[allow(dead_code)]
-    pub fn pop_error_front(&mut self) -> Option<String> {
+    pub fn pop_error_front(&mut self) -> Option<MCDError> {
         self.errors.pop_front()
     }
 
-    pub fn pop_error_back(&mut self) -> Option<String> {
+    pub fn pop_error_back(&mut self) -> Option<MCDError> {
         self.errors.pop_back()
     }
 
@@ -478,13 +479,15 @@ impl<R: Read + Seek> MCDParser<R> {
                 b"PanoramaPixelYPos" => self.sub_state = ParserState::ProcessingPanoramaPixelYPos,
                 _ => match std::str::from_utf8(e.local_name().as_ref()) {
                     Ok(name) => {
-                        self.errors
-                            .push_back(format!("[Start] Unknown tag name: {}", name));
+                        self.errors.push_back(MCDError::UnknownTag {
+                            name: name.to_owned(),
+                        });
 
-                        panic!("[Start] Unknown tag name: {}", name);
+                        // panic!("[Start] Unknown tag name: {}", name);
                     }
                     Err(error) => {
-                        println!("Failed to convert tag name: {}", error);
+                        // println!("Failed to convert tag name: {}", error);
+                        self.errors.push_back(error.into());
 
                         self.state = ParserState::FatalError
                     }
@@ -586,11 +589,12 @@ impl<R: Read + Seek> MCDParser<R> {
                 b"MCDSchema" => self.state = ParserState::Finished,
                 _ => match std::str::from_utf8(e.local_name().into_inner()) {
                     Ok(name) => {
-                        self.errors
-                            .push_back(format!("[End] Unknown tag name: {}", name));
+                        self.errors.push_back(MCDError::UnknownTag {
+                            name: name.to_owned(),
+                        });
                     }
                     Err(error) => {
-                        println!("Failed to convert tag name: {}", error);
+                        self.errors.push_back(error.into());
 
                         self.state = ParserState::FatalError
                     }

@@ -12,3 +12,5 @@ tmp.xml
 test/
 
 *.h5
+
+*.py

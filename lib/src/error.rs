@@ -1,4 +1,4 @@
-use std::{io, result};
+use std::{io, result, str::Utf8Error, string::FromUtf16Error};
 
 use lz4_flex::block::DecompressError;
 use thiserror::Error;
@@ -45,4 +45,32 @@ pub enum MCDError {
     /// specified either by using .from_path() or .set_location() then this error will occur.
     #[error("No location specified, so can't generate a .dcm file.")]
     LocationNotSpecified,
+
+    /// An error occurred when converting XML to UTF-16
+    #[error("An error occurred when converting XML to UTF-16")]
+    Utf16Erorr {
+        #[from]
+        /// The original error that was raised.
+        source: FromUtf16Error,
+    },
+
+    /// An unknown tag appeared in the XML file
+    #[error("An unknown tag appeared in the XML file")]
+    UnknownTag { name: String },
+
+    /// An error occured when parsing part of the XML file (conversion to UTF-8)
+    #[error("An error occured when parsing part of the XML file (conversion to UTF-8)")]
+    InvalidUtf8 {
+        #[from]
+        /// The original error that was raised.
+        source: Utf8Error,
+    },
+
+    /// An error occured when parsing the XML file
+    #[error("An error occured when parsing the XML file")]
+    InvalidXML {
+        #[from]
+        /// The original error that was raised.
+        source: quick_xml::Error,
+    },
 }

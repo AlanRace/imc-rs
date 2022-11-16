@@ -305,13 +305,14 @@ impl<R: Read + Seek> MCD<R> {
                     // Check whether we are finished or have encounted a fatal error
                     match parser.current_state() {
                         ParserState::FatalError => {
-                            let error = match parser.pop_error_back() {
+                            match parser.pop_error_back() {
                                 // TODO: Probably a better way of doing this..
-                                Some(value) => value,
-                                None => String::from("unknown error"),
-                            };
+                                Some(value) => return Err(value),
+                                None => println!(
+                                    "A fatal error occurred when parsing, but it wasn't recorded"
+                                ),
+                            }
 
-                            println!("An fatal error occurred when parsing: {}", error);
                             break;
                         }
                         ParserState::Finished => {
@@ -321,8 +322,9 @@ impl<R: Read + Seek> MCD<R> {
                     }
                 }
                 Err(error) => {
-                    println!("An error occurred when reading: {}", error);
-                    break;
+                    return Err(error.into());
+                    // println!("An error occurred when reading: {}", error);
+                    // break;
                 }
             }
 
@@ -339,7 +341,7 @@ impl<R: Read + Seek> MCD<R> {
     }
 
     /// Returns the raw XML metadata stored in the .mcd file
-    pub fn xml(&self) -> std::io::Result<String> {
+    pub fn xml(&self) -> Result<String> {
         let chunk_size: i64 = 1000;
         let mut cur_offset: i64 = 0;
 
@@ -376,12 +378,8 @@ impl<R: Read + Seek> MCD<R> {
         let mut buf_u16: Vec<u16> = vec![0; buf_u8.len() / 2];
         u16_from_u8(&mut buf_u16, &buf_u8);
 
-        match String::from_utf16(&buf_u16) {
-            Ok(data) => combined_xml.push_str(&data),
-            Err(error) => {
-                println!("{}", error)
-            }
-        }
+        let data = String::from_utf16(&buf_u16)?;
+        combined_xml.push_str(&data);
 
         Ok(combined_xml)
     }
@@ -964,6 +962,24 @@ mod tests {
         }
 
         // println!("{:?}", cell);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_all_in_folder() -> Result<()> {
+        let paths = std::fs::read_dir("test/").unwrap();
+
+        for path in paths {
+            let path = path?;
+
+            if path.path().extension().unwrap() != "mcd" {
+                println!("Skipping {:?} file.", path.path().extension().unwrap());
+                continue;
+            }
+
+            let mcd = MCD::from_path(path.path())?;
+        }
 
         Ok(())
     }
