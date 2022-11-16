@@ -359,9 +359,7 @@ impl<R: Read + Seek> MCD<R> {
         let chunk_size_i64: i64 = 1000;
         let mut cur_offset: i64 = 0;
 
-        let chunk_size = chunk_size_i64.try_into().or(Err(MCDError::InvalidOffset {
-            offset: chunk_size_i64,
-        }))?;
+        let chunk_size = chunk_size_i64.try_into()?;
 
         let mut buf_u8 = vec![0; chunk_size];
 
@@ -379,12 +377,7 @@ impl<R: Read + Seek> MCD<R> {
                     let start_index = find_mcd_start(&buf_u8, chunk_size);
 
                     let total_size = cur_offset + chunk_size_i64 - (start_index as i64);
-                    buf_u8 = vec![
-                        0;
-                        total_size
-                            .try_into()
-                            .or(Err(MCDError::InvalidOffset { offset: total_size }))?
-                    ];
+                    buf_u8 = vec![0; total_size.try_into()?];
 
                     reader.seek(SeekFrom::End(-total_size))?;
                     reader.read_exact(&mut buf_u8)?;

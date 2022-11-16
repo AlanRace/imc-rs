@@ -1,4 +1,4 @@
-use std::{io, result, str::Utf8Error, string::FromUtf16Error};
+use std::{io, num::TryFromIntError, result, str::Utf8Error, string::FromUtf16Error};
 
 use lz4_flex::block::DecompressError;
 use thiserror::Error;
@@ -81,7 +81,7 @@ pub enum MCDError {
     },
 
     /// An error occured when parsing an image.
-    #[error("An error occured when parsing an image.")]
+    #[error("An error occured when parsing an image: {source}")]
     ImageError {
         #[from]
         /// The original error that was raised.
@@ -95,4 +95,12 @@ pub enum MCDError {
     /// Invalid offset in file.
     #[error("Invalid offset in file: {offset}")]
     InvalidOffset { offset: i64 },
+
+    /// An error occured when trying to convert from an integer.
+    #[error("Could not convert value to unsigned integer: {source}.")]
+    TryFromIntError {
+        #[from]
+        /// The original error that was raised.
+        source: TryFromIntError,
+    },
 }
