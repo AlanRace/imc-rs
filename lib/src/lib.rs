@@ -550,7 +550,7 @@ impl<R> MCD<R> {
             ordered_channels.push(channel);
         }
 
-        ordered_channels.sort_by_key(|a| a.label());
+        ordered_channels.sort_by_key(|a| [a.label(), a.name()]);
 
         ordered_channels
     }
