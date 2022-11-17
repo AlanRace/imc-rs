@@ -501,8 +501,8 @@ impl<R> Acquisition<R> {
 
             let images: Vec<_> = data
                 .drain(..)
-                //.zip(channels.iter())
-                .map(|data| {
+                .zip(channels.iter())
+                .map(|(data, channel)| {
                     let mut min_value = f32::MAX;
                     let mut max_value = f32::MIN;
 
@@ -517,6 +517,9 @@ impl<R> Acquisition<R> {
 
                     ChannelImage {
                         region,
+                        acquisition_id: channel.acquisition_id(),
+                        name: channel.name().to_string(),
+                        label: channel.label().to_string(),
                         range: (min_value, max_value),
                         valid_pixels: valid_pixels as usize,
                         data,

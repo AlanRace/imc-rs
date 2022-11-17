@@ -696,6 +696,10 @@ impl<T: num_traits::Num + Copy> BoundingBox<T> {
 pub struct ChannelImage {
     region: Region,
 
+    acquisition_id: u16,
+    name: String,
+    label: String,
+
     range: (f32, f32),
     valid_pixels: usize,
     data: Vec<f32>,
@@ -730,6 +734,21 @@ impl ChannelImage {
     /// Returns the detected intensity values for this channel
     pub fn intensities(&self) -> &[f32] {
         &self.data
+    }
+
+    /// Returns the ID for the acquisition this channel belongs to.
+    pub fn acquisition_id(&self) -> u16 {
+        self.acquisition_id
+    }
+
+    /// Returns the name of this channel
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the label assigned to this channel
+    pub fn label(&self) -> &str {
+        &self.label
     }
 }
 
