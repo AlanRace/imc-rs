@@ -16,13 +16,12 @@ use pyo3::prelude::*;
 use numpy::{IntoPyArray, PyArray3};
 
 use std::fs::File;
-use std::io::BufReader;
 use std::sync::Arc;
 
 /// Mcd represents an .mcd file
 #[pyclass]
 struct Mcd {
-    mcd: Arc<imc_rs::MCD<BufReader<File>>>,
+    mcd: Arc<imc_rs::MCD<File>>,
 }
 
 struct PyMcdError(MCDError);
@@ -44,12 +43,7 @@ impl Mcd {
     /// Parse an .mcd file, returning an object providing access to IMC data and accompanying metadata
     #[staticmethod]
     pub fn parse(filename: &str) -> PyResult<Self> {
-        let file = match File::open(filename) {
-            Ok(file) => file,
-            Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
-        };
-
-        let mcd = match imc_rs::MCD::parse(BufReader::new(file), filename) {
+        let mcd = match MCD::from_path(filename) {
             Ok(mcd) => mcd,
             Err(error) => return Err(PyMcdError::from(error).into()),
         };
@@ -61,12 +55,12 @@ impl Mcd {
     /// returning an object providing access to IMC data and accompanying metadata
     #[staticmethod]
     pub fn parse_with_dcm(filename: &str) -> PyResult<Self> {
-        let file = match File::open(filename) {
-            Ok(file) => file,
-            Err(error) => return Err(PyErr::new::<exceptions::PyIOError, _>(error)),
+        let mcd = match MCD::from_path(filename) {
+            Ok(mcd) => mcd,
+            Err(error) => return Err(PyMcdError::from(error).into()),
         };
 
-        let mcd = match imc_rs::MCD::parse_with_dcm(BufReader::new(file), filename) {
+        let mcd = match mcd.with_dcm() {
             Ok(mcd) => mcd,
             Err(error) => return Err(PyMcdError::from(error).into()),
         };
@@ -96,7 +90,7 @@ impl Mcd {
     pub fn xml(&self) -> PyResult<String> {
         match self.mcd.xml() {
             Ok(xml) => Ok(xml),
-            Err(error) => Err(PyErr::new::<exceptions::PyIOError, _>(error)),
+            Err(error) => Err(PyMcdError::from(error).into()),
         }
     }
 
@@ -201,13 +195,13 @@ impl AcquisitionChannel {
 
 #[pyclass]
 struct Slide {
-    mcd: Arc<MCD<BufReader<File>>>,
+    mcd: Arc<MCD<File>>,
 
     id: u16,
 }
 
 impl Slide {
-    fn get_slide(&self) -> &imc_rs::Slide<BufReader<File>> {
+    fn get_slide(&self) -> &imc_rs::Slide<File> {
         self.mcd.slide(self.id).expect("Should be valid slide id")
     }
 }
@@ -333,14 +327,14 @@ impl Slide {
 
 #[pyclass]
 struct Panorama {
-    mcd: Arc<MCD<BufReader<File>>>,
+    mcd: Arc<MCD<File>>,
 
     id: u16,
     slide_id: u16,
 }
 
 impl Panorama {
-    fn get_panorama(&self) -> &imc_rs::Panorama<BufReader<File>> {
+    fn get_panorama(&self) -> &imc_rs::Panorama<File> {
         self.mcd
             .slide(self.slide_id)
             .expect("Should be valid slide id")
@@ -380,7 +374,7 @@ impl Panorama {
 
 #[pyclass]
 struct Acquisition {
-    mcd: Arc<imc_rs::MCD<BufReader<File>>>,
+    mcd: Arc<imc_rs::MCD<File>>,
 
     id: u16,
     panorama_id: u16,
@@ -388,7 +382,7 @@ struct Acquisition {
 }
 
 impl Acquisition {
-    fn get_acquisition(&self) -> &imc_rs::Acquisition<BufReader<File>> {
+    fn get_acquisition(&self) -> &imc_rs::Acquisition<File> {
         self.mcd
             .slide(self.slide_id)
             .expect("Should be valid slide id")

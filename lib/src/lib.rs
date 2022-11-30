@@ -51,7 +51,7 @@ use image::io::Reader as ImageReader;
 use std::convert::TryInto;
 use std::fmt;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Cursor, Read, Seek, SeekFrom};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom};
 
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
@@ -1013,7 +1013,7 @@ mod tests {
 
     #[test]
     fn test_all_in_folder() -> Result<()> {
-        let paths = std::fs::read_dir("test/").unwrap();
+        let paths = std::fs::read_dir("../test/").unwrap();
 
         for path in paths {
             let path = path?;

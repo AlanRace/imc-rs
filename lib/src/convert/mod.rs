@@ -6,6 +6,7 @@ use std::{
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use rayon::prelude::{ParallelDrainRange, ParallelIterator};
 
 use crate::{error::MCDError, Acquisition, Region, MCD};
 
@@ -103,7 +104,7 @@ pub fn convert<R: Read + Seek, W: Write + Seek>(
 
     //println!("Writing {} acquisitions.", num_acquisitions);
 
-    let chunk_size = 128;
+    let chunk_size = 256;
 
     //dcm_file.write_u8(chunk_size as u8)?;
 
@@ -161,25 +162,53 @@ pub fn convert<R: Read + Seek, W: Write + Seek>(
                                     }
                                 };
 
-                                for (index, intensity) in spectrum.iter().enumerate() {
-                                    channel_chunks[index].push(*intensity);
+                                for (channel_chunk, intensity) in
+                                    channel_chunks.iter_mut().zip(spectrum.iter())
+                                {
+                                    channel_chunk.push(*intensity);
                                 }
                             }
                         }
 
                         let mut pixel_chunk = PixelChunk::new();
 
-                        for channel_chunk in channel_chunks {
-                            let num_intensities = channel_chunk.len();
+                        let compressed_chunks = channel_chunks
+                            .par_drain(..)
+                            .map(|channel_chunk| {
+                                let num_intensities = channel_chunk.len();
 
-                            let mut buf: Vec<u8> = Vec::with_capacity(channel_chunk.len() * 4);
+                                let mut buf: Vec<u8> = Vec::with_capacity(channel_chunk.len() * 4);
 
-                            for intensity in channel_chunk {
-                                buf.write_f32::<LittleEndian>(intensity)?;
-                            }
+                                for intensity in channel_chunk {
+                                    buf.write_f32::<LittleEndian>(intensity)?;
+                                }
 
-                            let compressed = lz4_flex::compress(&buf);
+                                Ok((num_intensities, lz4_flex::compress(&buf)))
+                            })
+                            .collect::<Result<Vec<_>, MCDError>>()?;
 
+                        // for channel_chunk in channel_chunks {
+                        //     let num_intensities = channel_chunk.len();
+
+                        //     let mut buf: Vec<u8> = Vec::with_capacity(channel_chunk.len() * 4);
+
+                        //     for intensity in channel_chunk {
+                        //         buf.write_f32::<LittleEndian>(intensity)?;
+                        //     }
+
+                        //     let compressed = lz4_flex::compress(&buf);
+
+                        //     let cur_location = dcm_file.seek(SeekFrom::Current(0))?;
+                        //     dcm_file.write_all(&compressed)?;
+                        //     let new_location = dcm_file.seek(SeekFrom::Current(0))?;
+
+                        //     pixel_chunk.channels.push(ChannelChunk {
+                        //         num_intensities: num_intensities as u64,
+                        //         offset: cur_location,
+                        //         length: new_location - cur_location,
+                        //     });
+                        // }
+                        for (num_intensities, compressed) in compressed_chunks {
                             let cur_location = dcm_file.seek(SeekFrom::Current(0))?;
                             dcm_file.write_all(&compressed)?;
                             let new_location = dcm_file.seek(SeekFrom::Current(0))?;
@@ -195,7 +224,7 @@ pub fn convert<R: Read + Seek, W: Write + Seek>(
                     }
                 }
 
-                let acquisition_index_location = dcm_file.seek(SeekFrom::Current(0)).unwrap();
+                let acquisition_index_location = dcm_file.seek(SeekFrom::Current(0))?;
                 acquisition_index.push((acquisition.id(), acquisition_index_location));
 
                 dcm_file.write_acquisition_details(&acq_details)?;
