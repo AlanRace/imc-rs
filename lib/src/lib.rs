@@ -855,7 +855,7 @@ impl Rule {
 
 #[cfg(test)]
 mod tests {
-    use image::{GenericImageView, ImageBuffer, Pixel, Rgba};
+    use image::{ImageBuffer, Pixel, Rgba};
     use tiff::decoder::Decoder;
 
     use super::*;
@@ -866,13 +866,16 @@ mod tests {
     fn test_load() -> Result<()> {
         let filename = "../test/20200612_FLU_1923.mcd";
 
+        println!("test_load() {:?}", filename);
+
+        println!("{:?}", File::open(filename));
         let start = Instant::now();
         let mcd = MCD::from_path(filename)?;
         println!("Time taken to parse .mcd: {:?}", start.elapsed());
 
         // Optionally we can load/create the .dcm file for fast access to images
         let start = Instant::now();
-        let mcd = mcd.with_dcm()?;
+        // let mcd = mcd.with_dcm()?;
         println!("Time taken to parse .dcm: {:?}", start.elapsed());
 
         let start = Instant::now();
@@ -880,6 +883,38 @@ mod tests {
         println!("Time taken to find acquisition: {:?}", start.elapsed());
 
         let dna = roi_001.channel(ChannelIdentifier::label("DNA1")).unwrap();
+
+        let start = Instant::now();
+        let dna_roi001 = roi_001.channel_image(dna, None).unwrap();
+        println!("Time taken to read channel image: {:?}", start.elapsed());
+
+        let mut acq_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::new(dna_roi001.width(), dna_roi001.height());
+
+        let mut index = 0;
+        let max_value = 20.0;
+        for y in 0..dna_roi001.height() {
+            if index >= dna_roi001.valid_pixels {
+                break;
+            }
+
+            for x in 0..dna_roi001.width() {
+                if index >= dna_roi001.valid_pixels {
+                    break;
+                }
+
+                let g = ((dna_roi001.data[index] / max_value) * 255.0) as u8;
+                let g = g as f64 / 255.0;
+
+                let cur_pixel = acq_image.get_pixel_mut(x as u32, y as u32).channels_mut();
+                cur_pixel[1] = (g * 255.0) as u8;
+                cur_pixel[3] = 255;
+
+                index += 1;
+            }
+        }
+
+        acq_image.save("dna.png").unwrap();
 
         // Available here: https://zenodo.org/record/4139443#.Y2okw0rMLmE
 
@@ -960,7 +995,7 @@ mod tests {
             for (x, y) in cell {
                 spectrum
                     .iter_mut()
-                    .zip(roi_001.spectrum(x as usize, y as usize)?.iter())
+                    .zip(roi_001.spectrum(x, y)?.iter())
                     .for_each(|(s, i)| s.push(*i));
             }
 

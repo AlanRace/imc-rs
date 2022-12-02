@@ -149,7 +149,7 @@ pub fn convert<R: Read + Seek, W: Write + Seek>(
 
                         for y in y_start..y_stop {
                             for x in x_start..x_stop {
-                                let spectrum = match acquisition.spectrum(x as usize, y as usize) {
+                                let spectrum = match acquisition.spectrum(x, y) {
                                     Ok(spectrum) => spectrum,
                                     Err(MCDError::InvalidIndex {
                                         index: _,

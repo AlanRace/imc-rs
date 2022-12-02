@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{BufReader, Cursor, Read, Seek, SeekFrom},
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -421,16 +421,21 @@ impl<R> Acquisition<R> {
 
         measured_size / self.spectrum_size()
     }
+}
 
+impl<R: Read + Seek> Acquisition<R> {
     /// Returns the ChannelImage for the channel matching the `ChannelIdentifier`. This contains the intensities of the channel
     /// for each detected pixel, the number of valid pixels and the width and height of the image.
-    pub fn channel_image<C: AsRef<ChannelIdentifier>>(
+    pub fn channel_image<C: Into<ChannelIdentifier>>(
         &self,
         identifier: C,
         region: Option<Region>,
     ) -> Result<ChannelImage> {
-        self.channel_images(&[identifier], region)
-            .map(|mut data| data.drain(..).last().unwrap())
+        Ok(self
+            .channel_images(&[identifier.into()], region)?
+            .drain(..)
+            .last()
+            .expect("A channel image should always be returned, as we always pass one identifier"))
     }
 
     /// Returns array of ChannelImages for the channels matching the `ChannelIdentifier`s. This contains the intensities of the channel
@@ -480,79 +485,64 @@ impl<R> Acquisition<R> {
             ((valid_region_row - region.y - 1) * region.width) + (valid_region_col - region.x)
         };
 
-        // println!(
-        //     "Valid pixels: {} | {} {} | {} {} | {}",
-        //     valid_pixels,
-        //     valid_region_col,
-        //     valid_region_row,
-        //     self.width(),
-        //     self.height(),
-        //     self.num_spectra()
-        // );
-
-        // let mut data = vec![0.0; valid_pixels as usize];
-        // let mut min_value = f32::MAX;
-        // let mut max_value = f32::MIN;
-
-        //println!("DCM Location: {:?}", self.dcm_location);
-
-        if let Some(data_location) = &self.dcm_location {
-            let mut data = data_location.read_channels(&order_numbers, &region)?;
-
-            let images: Vec<_> = data
-                .drain(..)
-                .zip(channels.iter())
-                .map(|(data, channel)| {
-                    let mut min_value = f32::MAX;
-                    let mut max_value = f32::MIN;
-
-                    for &data_point in data.iter() {
-                        if data_point < min_value {
-                            min_value = data_point;
-                        }
-                        if data_point > max_value {
-                            max_value = data_point;
-                        }
-                    }
-
-                    ChannelImage {
-                        region,
-                        acquisition_id: channel.acquisition_id(),
-                        name: channel.name().to_string(),
-                        label: channel.label().to_string(),
-                        range: (min_value, max_value),
-                        valid_pixels: valid_pixels as usize,
-                        data,
-                    }
-                })
-                .collect();
-
-            Ok(images)
+        let mut data = if let Some(data_location) = &self.dcm_location {
+            data_location.read_channels(&order_numbers, &region)?
         } else {
-            todo!();
-            // let offset = self.data_start_offset as u64
-            //     + channel.order_number() as u64 * self.value_bytes as u64;
+            let mut data: Vec<Vec<f32>> =
+                vec![
+                    Vec::with_capacity((region.width * region.height) as usize);
+                    identifiers.len()
+                ];
 
-            // let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
-            // // TODO: Currently this only works for f32
-            // let mut buf = [0; 4];
+            let order_hash: HashSet<usize> = HashSet::from_iter(order_numbers.iter().copied());
 
-            // reader.seek(SeekFrom::Start(offset))?;
-            // for data_point in data.iter_mut() {
-            //     reader.read_exact(&mut buf)?;
+            for y in region.y..(region.y + region.height) {
+                for x in region.x..(region.x + region.width) {
+                    for (channel_index, intensity) in self
+                        .spectrum(x, y)?
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _intensity)| order_hash.contains(index))
+                        .map(|(_, intensity)| *intensity)
+                        .enumerate()
+                    {
+                        data[channel_index].push(intensity);
+                    }
+                }
+            }
 
-            //     *data_point = f32::from_le_bytes(buf);
+            data
+        };
 
-            //     if *data_point < min_value {
-            //         min_value = *data_point;
-            //     }
-            //     if *data_point > max_value {
-            //         max_value = *data_point;
-            //     }
+        let images: Vec<_> = data
+            .drain(..)
+            .zip(channels.iter())
+            .map(|(data, channel)| {
+                let mut min_value = f32::MAX;
+                let mut max_value = f32::MIN;
 
-            //     reader.seek(SeekFrom::Current(self.spectrum_size() as i64 - 4))?;
-            // }
-        }
+                for &data_point in data.iter() {
+                    if data_point < min_value {
+                        min_value = data_point;
+                    }
+                    if data_point > max_value {
+                        max_value = data_point;
+                    }
+                }
+
+                ChannelImage {
+                    region,
+                    acquisition_id: channel.acquisition_id(),
+                    name: channel.name().to_string(),
+                    label: channel.label().to_string(),
+                    range: (min_value, max_value),
+                    valid_pixels: valid_pixels as usize,
+                    data,
+                }
+            })
+            .collect();
+
+        Ok(images)
 
         // Ok(ChannelImage {
         //     region,
@@ -602,8 +592,8 @@ impl<R: Read + Seek> Acquisition<R> {
     }
 
     /// Returns a spectrum at the specified (x, y) coordinate
-    pub fn spectrum(&self, x: usize, y: usize) -> Result<Vec<f32>> {
-        let index = y * self.max_x as usize + x;
+    pub fn spectrum(&self, x: u32, y: u32) -> Result<Vec<f32>> {
+        let index = y as usize * self.max_x as usize + x as usize;
 
         if index >= self.num_spectra() {
             return Err(MCDError::InvalidIndex {
@@ -619,7 +609,7 @@ impl<R: Read + Seek> Acquisition<R> {
         let mut reader = self.reader.as_ref().unwrap().lock().unwrap();
 
         // TODO: Handle this properly without unwrapping
-        reader.seek(SeekFrom::Start(offset)).unwrap();
+        reader.seek(SeekFrom::Start(offset))?;
 
         let mut buffer = [0u8; 4];
         for _i in 0..self.channels.len() {

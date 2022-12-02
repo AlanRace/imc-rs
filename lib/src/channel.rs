@@ -31,6 +31,18 @@ impl AsRef<ChannelIdentifier> for ChannelIdentifier {
     }
 }
 
+impl From<&ChannelIdentifier> for ChannelIdentifier {
+    fn from(identifier: &ChannelIdentifier) -> Self {
+        identifier.clone()
+    }
+}
+
+impl From<&AcquisitionChannel> for ChannelIdentifier {
+    fn from(acq_channel: &AcquisitionChannel) -> Self {
+        ChannelIdentifier::Name(acq_channel.channel_name.to_owned())
+    }
+}
+
 /// AcquisitionChannel represents a single channel acquired, forming part of an acquisition
 #[derive(Debug, Clone)]
 pub struct AcquisitionChannel {
