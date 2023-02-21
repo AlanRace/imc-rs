@@ -12,14 +12,17 @@ pub enum ChannelIdentifier {
 }
 
 impl ChannelIdentifier {
+    /// Create a channel identifier based on the exact label.
     pub fn label(label: &str) -> Self {
         Self::Label(label.into())
     }
 
+    /// Create a channel identifier based on the exact channel name.
     pub fn name(name: &str) -> Self {
         Self::Name(name.into())
     }
 
+    /// Create a channel identifier based on the order in which the channel was acquired.
     pub fn order(order: i16) -> Self {
         Self::Order(order)
     }

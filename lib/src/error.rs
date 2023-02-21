@@ -3,7 +3,7 @@ use std::{io, num::TryFromIntError, result, str::Utf8Error, string::FromUtf16Err
 use lz4_flex::block::DecompressError;
 use thiserror::Error;
 
-use crate::{acquisition::AcquisitionIdentifier, ChannelIdentifier};
+use crate::ChannelIdentifier;
 
 /// A type alias for `Result<T, imc_rs::MCDError>`.
 pub type Result<T> = result::Result<T, MCDError>;
@@ -94,7 +94,10 @@ pub enum MCDError {
 
     /// Invalid offset in file.
     #[error("Invalid offset in file: {offset}")]
-    InvalidOffset { offset: i64 },
+    InvalidOffset {
+        /// Offset not reachable in the file.
+        offset: i64,
+    },
 
     /// An error occured when trying to convert from an integer.
     #[error("Could not convert value to unsigned integer: {source}.")]

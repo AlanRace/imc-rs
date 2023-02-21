@@ -87,6 +87,7 @@ impl PixelChunk {
     }
 }
 
+/// Function to convert an .mcd file to a .dcm file.
 pub fn convert<R: Read + Seek, W: Write + Seek>(
     mcd: &MCD<R>,
     mut dcm_file: W,
@@ -343,6 +344,7 @@ impl<T: WriteBytesExt> WriteDCM for T {
     }
 }
 
+/// Open an .mcd file
 pub fn open(mcd: &mut MCD<File>) -> Result<(), MCDError> {
     //println!("Opening {:?} for reading", mcd.dcm_file());
     let dcm_file = std::fs::File::open(mcd.dcm_file().ok_or(MCDError::LocationNotSpecified)?)?;
@@ -387,6 +389,7 @@ pub fn open(mcd: &mut MCD<File>) -> Result<(), MCDError> {
     Ok(())
 }
 
+/// DCMLocation describes where the acquisition is stored.
 #[derive(Debug, Clone)]
 pub struct DCMLocation {
     reader: Arc<Mutex<BufReader<File>>>,
@@ -399,6 +402,7 @@ impl DCMLocation {
     //         .map(|mut data| data.drain(..).last().unwrap())
     // }
 
+    /// Read in multiple channels at once. This can be faster than reading in single channels.
     pub fn read_channels(
         &self,
         channels: &[usize],

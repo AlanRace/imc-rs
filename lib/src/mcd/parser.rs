@@ -225,7 +225,7 @@ impl<R: Read + Seek> MCDParser<R> {
         let mut acquisitions = HashMap::new();
         for (id, mut acquisition) in self.acquisitions.drain() {
             acquisition.reader = Some(reader.clone());
-            acquisition.fix_roi_start_pos();
+            acquisition.fix_roi_positions();
 
             acquisitions.insert(id, acquisition);
         }

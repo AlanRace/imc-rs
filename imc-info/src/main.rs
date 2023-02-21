@@ -1,5 +1,3 @@
-use std::io::BufReader;
-
 use clap::Parser;
 use imc_rs::MCD;
 
